@@ -542,28 +542,53 @@ function renderShare() {
   const nm = h('input', { type: 'text', value: rec.name });
   const doRename = async () => { try { await api(`/api/files/${rec.id}`, { method: 'PATCH', json: { name: nm.value } }); pipe.quick('rename: display name changed in meta.json'); toast('renamed'); await loadFiles(); renderShare(); } catch (e) { } };
   nm.onkeydown = e => { if (e.key === 'Enter') doRename(); };
-  const out = h('div', { id: 'shareOut' });
+  const sendOut = h('div'), linkOut = h('div');
+  // Same name the download route gives this version, so the shared file matches a manual download
+  const fname = S.ver === rec.current ? rec.name : rec.name.replace(/(\.[^.]+)?$/, `-v${S.ver}$1`);
+  const dlUrl = `/api/files/${rec.id}/download?v=${S.ver}`;
+  // Fetched now, not on click: navigator.share needs the click's user activation, which a slow fetch could outlast
+  let file = null;
+  fetch(dlUrl).then(r => r.blob()).then(b => { file = new File([b], fname, { type: b.type || 'application/pdf' }); }).catch(() => {});
+  const canShareFiles = () => !!(file && navigator.canShare && navigator.canShare({ files: [file] }));
+  const APPS = {
+    whatsapp: { name: 'WhatsApp', open: 'https://web.whatsapp.com/', attach: 'open the chat and drag the file in, or click + → Document' },
+    telegram: { name: 'Telegram', open: 'https://web.telegram.org/', attach: 'open the chat and drag the file in, or click the paperclip' },
+    gmail: { name: 'Gmail', open: `https://mail.google.com/mail/?view=cm&fs=1&su=${encodeURIComponent(fname)}`, attach: 'drag the file into the email, or click the paperclip' },
+    mailto: { name: 'your mail app', open: `mailto:?subject=${encodeURIComponent(fname)}`, attach: 'attach it to the new email' },
+  };
   p.append(h('div', { class: 'sharebox' },
     h('div', { class: 'field', style: 'margin:0' }, h('label', {}, '1 · FILE NAME (kept extension is added automatically)'), h('div', { class: 'urlbox' }, nm, h('button', { class: 'btn', onclick: doRename }, 'RENAME'))),
     h('div', { class: 'hint', style: 'margin:0' }, 'Backend: only the display name in meta.json changes. The file on disk stays <id>/vN.pdf, so two files with the same name can never collide.'),
-    h('div', { class: 'field', style: 'margin:0' }, h('label', {}, '2 · SEND'), h('div', { class: 'plat' },
-      h('button', { class: 'btn', onclick: () => makeLink() }, '🔗 Create link'),
-      h('button', { class: 'btn wa', onclick: () => makeLink('whatsapp') }, 'WhatsApp'), h('button', { class: 'btn tg', onclick: () => makeLink('telegram') }, 'Telegram'), h('button', { class: 'btn gm', onclick: () => makeLink('gmail') }, 'Gmail'), h('button', { class: 'btn', onclick: () => makeLink('mailto') }, 'Mail app'),
-      navigator.canShare ? h('button', { class: 'btn', onclick: nativeShare }, '📱 Share file (device menu)') : null)),
-    h('div', { class: 'field', style: 'margin:0' }, h('label', {}, '3 · CLOUD'), h('div', { class: 'plat' },
+    h('div', { class: 'field', style: 'margin:0' }, h('label', {}, `2 · SEND THE FILE (${fname})`), h('div', { class: 'plat' },
+      h('button', { class: 'btn wa', onclick: () => sendFile('whatsapp') }, 'WhatsApp'), h('button', { class: 'btn tg', onclick: () => sendFile('telegram') }, 'Telegram'), h('button', { class: 'btn gm', onclick: () => sendFile('gmail') }, 'Gmail'), h('button', { class: 'btn', onclick: () => sendFile('mailto') }, 'Mail app'),
+      navigator.canShare ? h('button', { class: 'btn', onclick: () => sendFile(null) }, '📤 Other apps…') : null)),
+    h('div', { class: 'hint', style: 'margin:0' }, 'Sends the file itself, not a link. Where your device has a share menu (phones; Chrome or Edge on Windows 10/11), it opens with the file attached: pick the app there. Otherwise the file is downloaded and the app opens, ready for you to attach it.'),
+    sendOut,
+    h('div', { class: 'field', style: 'margin:0' }, h('label', {}, '3 · DOWNLOAD LINK'), h('div', { class: 'plat' }, h('button', { class: 'btn', onclick: makeLink }, '🔗 Create link'))),
+    linkOut,
+    h('div', { class: 'field', style: 'margin:0' }, h('label', {}, '4 · CLOUD'), h('div', { class: 'plat' },
       ...[['gdrive', 'Google Drive'], ['onedrive', 'OneDrive']].map(([k, n]) => h('button', { class: 'btn' + (S.integ[k]?.configured ? '' : ' notcfg'), onclick: () => cloud(k) }, n + (S.integ[k]?.configured ? '' : ' (not configured)'))))),
-    out,
-    h('div', { class: 'hint', style: 'margin:0' }, 'Backend: "Create link" stores a random token → (session, file, version) with an expiry. WhatsApp/Telegram/Gmail buttons just open those apps with the link pre-filled; they do not upload anything themselves. Links only work for other people if the server is reachable from the internet.')));
+    h('div', { class: 'hint', style: 'margin:0' }, 'Backend: "Create link" stores a random token → (session, file, version) with an expiry. Other people can only open it when this server is reachable from the internet (PDFSCOPE_PUBLIC_URL).')));
   root.append(p);
-  async function makeLink(plat) {
+  async function sendFile(plat) {
+    const app = APPS[plat];
+    if (canShareFiles()) {
+      try { await navigator.share({ files: [file], title: fname }); pipe.quick(`share: ${fname} handed to the device share menu`); sendOut.innerHTML = ''; return; }
+      catch (e) { if (e.name === 'AbortError') return; if (!app) return showFault({ code: 'E_WEBSHARE', title: 'Device share menu failed', cause: e.message, fix: 'Use one of the app buttons instead: they download the file and open the app.', frames: [], traceback: e.stack || '' }); }
+    }
+    // No share menu here (or it failed): download the file, open the app, and say how to attach it
+    h('a', { href: dlUrl, download: fname }).click();
+    window.open(app.open, '_blank', 'noopener');
+    pipe.quick(`share: ${fname} downloaded, ${app.name} opened`);
+    sendOut.innerHTML = ''; sendOut.append(h('div', { class: 'hint', style: 'margin:0' }, `"${fname}" was saved to your Downloads folder. In ${app.name}, ${app.attach}. Websites can't attach files to other apps by themselves, so this last step is yours.`));
+  }
+  async function makeLink() {
     let r; try { r = await api(`/api/files/${rec.id}/share`, { method: 'POST', json: { v: S.ver } }); } catch (e) { return; }
     pipe.quick('share: token minted, expires ' + new Date(r.expires * 1000).toLocaleString());
-    out.innerHTML = ''; out.append(h('div', { class: 'urlbox' }, h('input', { type: 'text', value: r.url, readonly: true, onclick: e => e.target.select() }), h('button', { class: 'btn', onclick: () => copy(r.url, 'link copied') }, 'COPY')), h('div', { class: 'hint' + (r.reachable ? '' : ' err'), style: 'margin:6px 0' }, r.warning || `Valid until ${new Date(r.expires * 1000).toLocaleString()}`));
-    if (plat) window.open(r.links[plat], '_blank', 'noopener');
-  }
-  async function nativeShare() {
-    try { const blob = await fetch(`/api/files/${rec.id}/download?v=${S.ver}`).then(r => r.blob()); const f = new File([blob], rec.name, { type: blob.type }); if (!navigator.canShare({ files: [f] })) throw new Error('This browser cannot share files. Use the link buttons.'); await navigator.share({ files: [f], title: rec.name }); }
-    catch (e) { if (e.name !== 'AbortError') showFault({ code: 'E_WEBSHARE', title: 'Device share menu unavailable', cause: e.message + ' The Web Share API with files works on phones and some desktop browsers over HTTPS or localhost only.', fix: 'Use Create link instead.', frames: [], traceback: e.stack || '' }); }
+    linkOut.innerHTML = ''; linkOut.append(h('div', { class: 'urlbox' }, h('input', { type: 'text', value: r.url, readonly: true, onclick: e => e.target.select() }), h('button', { class: 'btn', onclick: () => copy(r.url, 'link copied') }, 'COPY')));
+    if (!r.reachable) return linkOut.append(h('div', { class: 'hint err', style: 'margin:6px 0' }, 'This link only works on this computer: it points to ' + new URL(r.url).host + ', which on any other device means that device itself. To send someone the PDF, use section 2. Links work for others once the server is reachable from the internet and PDFSCOPE_PUBLIC_URL is set.'));
+    linkOut.append(h('div', { class: 'hint', style: 'margin:6px 0' }, `Valid until ${new Date(r.expires * 1000).toLocaleString()}. Send the link with:`),
+      h('div', { class: 'plat' }, ...[['whatsapp', 'WhatsApp', 'wa'], ['telegram', 'Telegram', 'tg'], ['gmail', 'Gmail', 'gm'], ['mailto', 'Mail app', '']].map(([k, n, c]) => h('button', { class: 'btn ' + c, onclick: () => window.open(r.links[k], '_blank', 'noopener') }, n))));
   }
   async function cloud(k) { try { await api(`/api/files/${rec.id}/export/${k}`, { method: 'POST' }); } catch (e) { } }
 }

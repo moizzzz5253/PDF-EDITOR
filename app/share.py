@@ -1,6 +1,8 @@
-"""Share links. A token maps to (session, file, version) with an expiry. Real
-'send to WhatsApp / Telegram / Gmail' = open those apps with a ready message that
-contains the link; Drive / OneDrive need OAuth keys (see integrations())."""
+"""Share links. A token maps to (session, file, version) with an expiry. links() builds
+'send the link via WhatsApp / Telegram / Gmail' URLs; the dashboard offers them only when
+the link is reachable by others (PDFSCOPE_PUBLIC_URL). Sending the file itself happens in
+the browser (device share menu, or download + open the app). Drive / OneDrive need OAuth
+keys (see integrations())."""
 import json
 import secrets
 import threading

@@ -48,7 +48,7 @@ The image includes LibreOffice, so Word to PDF works out of the box.
 | Versions | Every edit makes a new version (v1, v2…). Nothing is overwritten. Click a version to view it or make it current again. |
 | Workspace | Drag-and-drop upload, page thumbnails, double-click to zoom, browse images inside zip results, rename, delete a file with all its versions, download any version |
 | Compare | Old vs new: pages aligned by content, pixel diff overlay, blink mode, text diff |
-| Share | Expiring link · WhatsApp / Telegram / Gmail / mail app launchers · device share menu (Web Share API) |
+| Share | Send the file itself to WhatsApp / Telegram / Gmail / mail app: through the device share menu (phones; Chrome or Edge on Windows 10/11), otherwise by downloading it and opening the app to attach it · expiring download links, which can be sent to apps once `PDFSCOPE_PUBLIC_URL` makes them reachable by others |
 | Diagnostics | Faults show the code, root cause, fix, failing step, exact `file:line`, stack and a copyable report. Browser-side errors are reported to the server log too. |
 | Technical | cwd, workspace, session folder, file sizes, MD5, disk, memory, CPU, uptime, request count and timing, versions, limits |
 | Themes | Phosphor, Paper, Blush, Sakura, Hot Pink and Rose Gold presets, plus custom accent and background colours. Saved per browser. |
