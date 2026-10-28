@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PDF//SCOPE</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%23060b0a'/><path d='M2 16 Q8 2 12 16 T22 16 T30 16' fill='none' stroke='%233dffb0' stroke-width='3'/></svg>">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header id="top">
+  <div class="brand"><svg width="30" height="20" viewBox="0 0 30 20"><path d="M1 10 Q6 -2 10 10 T19 10 T29 10" fill="none" stroke="currentColor" stroke-width="2.4"/></svg>
+    <span>PDF<b>//</b>SCOPE</span><small id="ver">signal-flow PDF workbench</small></div>
+  <div class="hstats">
+    <span class="chip"><i class="led ok" id="srvLed"></i><span id="srvTxt">LINK UP</span></span>
+    <span class="chip" title="Your private workspace on the server">SID <b id="sid">--------</b></span>
+    <button class="chip btn" id="faultBadge" title="Open the last fault report">FAULTS <b id="faultN">0</b></button>
+  </div>
+</header>
+
+<main id="app">
+  <aside id="left">
+    <section class="panel" id="filesPanel">
+      <h3><span>FILES</span><em id="filesCount">0</em></h3>
+      <label class="drop" id="drop"><input type="file" id="upInput" multiple hidden>
+        <b>DROP FILES HERE</b><span>PDF · DOCX · JPG · PNG</span><div class="rx"></div></label>
+      <ul id="fileList"></ul>
+    </section>
+    <section class="panel" id="toolsPanel">
+      <h3><span>TOOLS</span></h3>
+      <div id="toolList"></div>
+      <button class="tool" data-tab="compare"><i>⇄</i><span>Compare old vs new</span></button>
+      <button class="tool" data-tab="share"><i>⇪</i><span>Rename &amp; share</span></button>
+    </section>
+    <section class="panel dim" id="limitsPanel">
+      <h3><span>NOT BUILT YET</span></h3>
+      <ul class="limits">
+        <li>PDF to Word (needs layout reconstruction)</li>
+        <li>Password-protected PDFs</li>
+        <li>OCR for scanned pages</li>
+        <li>Editing text inside a page</li>
+        <li>True crop (redaction) - crop only hides</li>
+        <li>Direct upload to Drive / OneDrive (needs your OAuth keys)</li>
+        <li>Login accounts (sessions are anonymous)</li>
+      </ul>
+    </section>
+  </aside>
+
+  <section id="center">
+    <div id="fault" hidden></div>
+    <section class="panel" id="pipePanel">
+      <h3><span>SIGNAL FLOW</span><em id="pipeInfo">idle - waiting for a command</em></h3>
+      <div id="pipe"></div>
+    </section>
+    <nav id="tabs">
+      <button data-tab="work" class="on">WORKBENCH</button>
+      <button data-tab="compare">COMPARE</button>
+      <button data-tab="share">RENAME &amp; SHARE</button>
+    </nav>
+    <section id="tab-work" class="tab on">
+      <div class="panel" id="stage">
+        <h3><span id="stageTitle">NO FILE SELECTED</span><em id="stageInfo"></em></h3>
+        <div id="versions"></div>
+        <div id="pages"></div>
+      </div>
+      <div class="panel" id="opForm"></div>
+    </section>
+    <section id="tab-compare" class="tab"></section>
+    <section id="tab-share" class="tab"></section>
+  </section>
+
+  <aside id="right">
+    <section class="panel" id="scopePanel">
+      <h3><span>SCOPE</span><em id="scopeInfo">CH1 · server activity</em></h3>
+      <canvas id="scope" width="640" height="200"></canvas>
+    </section>
+    <section class="panel" id="inspPanel">
+      <h3><span>STEP INSPECTOR</span><em>what the server just did</em></h3>
+      <div id="insp"></div>
+    </section>
+    <section class="panel" id="logPanel">
+      <h3><span>BACKEND LOG</span><em><label><input type="checkbox" id="logErr"> errors only</label></em></h3>
+      <div id="log"></div>
+    </section>
+    <section class="panel" id="sysPanel">
+      <h3><span>SYSTEM</span><em>click a value to copy</em></h3>
+      <dl id="sys"></dl>
+    </section>
+  </aside>
+</main>
+<div id="toast"></div>
+<div id="lightbox" hidden></div>
+<script src="/app.js"></script>
+</body>
+</html>
