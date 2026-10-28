@@ -7,17 +7,22 @@ Backend Log show the real server steps, calls and timings.
 ## Run
 
 ### Windows, one click
-1. Once, from the project folder:
-   ```bash
-   python -m venv venv
-   venv\Scripts\pip install -r requirements.txt
-   ```
-2. Double-click **`Start PDF Scope.vbs`**. It starts a small control helper with no console window
-   and opens its page at http://127.0.0.1:8100.
-3. Use **Start / Stop / Open / Quit** there. The app itself runs at http://127.0.0.1:8000.
-   The dashboard's **STOP** button also stops the server through the helper. Your files stay in the workspace.
+Double-click **`Start PDF Scope.vbs`**. You don't need to install anything first.
 
-Nothing starts at boot or login. Logs go to `logs/server.log` and `logs/launcher.log`.
+On the first run, a setup window (`launcher/setup.ps1`) takes care of the rest:
+- **No Python 3.10+?** It offers to install Python 3.12 with winget, for your user only and without admin rights.
+  Without winget, it opens python.org and explains the one installer checkbox that matters.
+- **Builds `venv\` and installs the packages.** This needs internet once, about 100 MB.
+- **Offers LibreOffice once.** It's optional and only needed for Word to PDF.
+
+Later launches skip setup and start straight away. Setup runs again by itself when `requirements.txt` changes
+(after a `git pull`, for example) or if `venv\` breaks.
+
+The launcher then starts a small control helper with no console window and opens its page at http://127.0.0.1:8100.
+Use **Start / Stop / Open / Quit** there. The app itself runs at http://127.0.0.1:8000.
+The dashboard's **STOP** button also stops the server through the helper. Your files stay in the workspace.
+
+Nothing starts at boot or login. Logs go to `logs/setup.log`, `logs/server.log` and `logs/launcher.log`.
 
 ### Any OS
 ```bash
@@ -26,7 +31,7 @@ python run.py                        # http://127.0.0.1:8000
 ```
 `HOST`, `PORT` and `RELOAD=1` change how `run.py` starts uvicorn.
 
-On Windows, install LibreOffice and set `PDFSCOPE_SOFFICE="C:\Program Files\LibreOffice\program\soffice.exe"`.
+LibreOffice is found on PATH or in its default Windows folder. For anywhere else, set `PDFSCOPE_SOFFICE` to the full `soffice` path.
 
 ### Docker (many users)
 ```bash
@@ -60,7 +65,7 @@ Drive/OneDrive upload (the buttons exist but need `GOOGLE_CLIENT_ID/SECRET`, `MS
 | `PDFSCOPE_SESSION_TTL_HOURS` | 24 | Idle sessions are cleaned up after this |
 | `PDFSCOPE_SHARE_TTL_HOURS` | 24 | Share link lifetime |
 | `PDFSCOPE_PUBLIC_URL` | (empty) | Public base URL, needed so share links work for other people |
-| `PDFSCOPE_SOFFICE` | `soffice` | LibreOffice binary |
+| `PDFSCOPE_SOFFICE` | auto | LibreOffice binary (default: `soffice` on PATH, then `Program Files\LibreOffice`) |
 | `PDFSCOPE_SOFFICE_TIMEOUT` | 120 | Seconds before a Word conversion is aborted |
 | `PDFSCOPE_COMPARE_MAX_PAGES` | 150 | Page limit for Compare |
 
@@ -86,6 +91,7 @@ Raise `AppError(code, title, cause, fix)` for any failure you can explain.
 ```
 run.py                     start the server
 Start PDF Scope.vbs        Windows one-click launcher
+launcher/setup.ps1         first-run setup: Python, venv, packages, LibreOffice
 launcher/control.py/.html  control helper on :8100 (Start/Stop/Open/Quit)
 app/main.py                HTTP routes, sessions, logging
 app/config.py              settings from environment variables

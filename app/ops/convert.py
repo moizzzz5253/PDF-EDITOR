@@ -163,7 +163,7 @@ def docx_to_pdf(ctx):
         if not exe:
             raise AppError("E_NO_SOFFICE", "LibreOffice is not installed on the server",
                            f"'{settings.soffice_bin}' was not found on PATH, so Word to PDF cannot run.",
-                           "Install it (Ubuntu: apt install libreoffice-writer; Windows/macOS: install LibreOffice and set PDFSCOPE_SOFFICE to its soffice path).")
+                           "Install it (Ubuntu: apt install libreoffice-writer; Windows: install LibreOffice to its default folder and restart the server; macOS or a custom folder: set PDFSCOPE_SOFFICE to its soffice path).")
         s["detail"] = exe
     work = ctx.tmp / "lo"
     work.mkdir()
