@@ -17,6 +17,11 @@ r = op("add_pages", pdf["id"], {"source": "blank", "blank_count": 2, "position":
 r = op("crop_pages", pdf["id"], {"pages": "1-2", "unit": "percent", "top": 10, "bottom": 5, "left": 5, "right": 5}); assert r["ok"]
 r = op("extract_pages", pdf["id"], {"pages": "3,1", "format": "pdf"}); assert r["file"]["versions"][-1]["pages"] == 2
 r = op("extract_pages", pdf["id"], {"pages": "1-2", "format": "txt"})
+r = op("rotate_pages", pdf["id"], {"pages": "1", "angle": "90"}); assert r["ok"]
+r = op("reorder_pages", pdf["id"], {"order": "reverse"}); assert r["file"]["versions"][-1]["pages"] == 5, r
+op("reorder_pages", pdf["id"], {"order": "1,1"})
+r = op("merge_pdfs", pdf["id"], {}, files=[("extra", open(A + "sample.pdf", "rb")), ("extra", open(A + "a.jpg", "rb"))])
+v = r["file"]["versions"]; assert v[-1]["pages"] == v[-2]["pages"] + pdf["versions"][0]["pages"] + 1, v
 r = op("pdf_to_image", pdf["id"], {"pages": "all", "format": "jpeg", "dpi": 80}); zipf = r["file"]; assert zipf["kind"] == "zip"
 r = op("image_to_pdf", zipf["id"], {"page_size": "a4"}); assert r["file"]["versions"][0]["pages"] == 5
 r = op("image_to_pdf", None, {"page_size": "fit"}, files=[("images", open(A + "a.jpg", "rb")), ("images", open(A + "b.png", "rb"))]); assert r["file"]["versions"][0]["pages"] == 2

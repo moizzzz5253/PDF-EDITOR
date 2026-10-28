@@ -5,4 +5,4 @@ with @operation(...). It shows up in the dashboard automatically (the UI builds 
 form from the `params` list), with tracing and error reporting included.
 """
 from .registry import OPERATIONS, operation, OpContext  # noqa: F401
-from . import convert, pages  # noqa: F401  (import = register)
+from . import convert, pages, pages_tools  # noqa: F401  (import = register)

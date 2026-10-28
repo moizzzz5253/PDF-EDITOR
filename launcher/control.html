@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PDF//SCOPE control</title>
+<style>
+:root{--bg:#050a09;--panel:#0a1412;--line:#17342d;--phos:#3dffb0;--red:#ff4d5e;--amber:#ffb340;--text:#d2f3e8;--dim:#6b968a}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;background:var(--bg);color:var(--text);font:14px/1.5 ui-monospace,Consolas,Menlo,monospace;display:grid;place-items:center;padding:16px}
+main{width:min(560px,100%);background:var(--panel);border:1px solid var(--line);padding:20px}
+h1{margin:0 0 4px;font-size:18px;letter-spacing:.16em;color:var(--phos)}
+.sub{color:var(--dim);font-size:12px;margin-bottom:16px}
+.state{display:flex;align-items:center;gap:10px;margin:12px 0;padding:10px;border:1px solid var(--line)}
+.led{width:10px;height:10px;border-radius:50%;background:var(--dim);flex:0 0 auto}
+.led.on{background:var(--phos);box-shadow:0 0 8px var(--phos)}
+.led.off{background:var(--red)}
+.led.busy{background:var(--amber);box-shadow:0 0 8px var(--amber)}
+.row{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+button,a.btn{font:inherit;padding:8px 14px;border:1px solid var(--line);background:transparent;color:var(--text);cursor:pointer;text-decoration:none}
+button:hover,a.btn:hover{border-color:var(--phos);color:var(--phos)}
+button:disabled{opacity:.4;cursor:default;border-color:var(--line);color:var(--text)}
+button.danger:hover{border-color:var(--red);color:var(--red)}
+#msg{min-height:20px;margin-top:10px;color:var(--amber);font-size:13px}
+pre{background:#030706;border:1px solid var(--line);padding:10px;max-height:240px;overflow:auto;font-size:12px;color:var(--dim);white-space:pre-wrap;margin:12px 0 0}
+</style>
+</head>
+<body>
+<main>
+  <h1>PDF//SCOPE</h1>
+  <div class="sub">Control panel for the PDF server. Localhost only.</div>
+  <div class="state"><i class="led" id="led"></i><span id="stateTxt">checking...</span></div>
+  <div class="row">
+    <button id="startBtn">Start</button>
+    <button id="stopBtn">Stop</button>
+    <a class="btn" id="openBtn" href="http://127.0.0.1:8000/" target="_blank" rel="noopener">Open PDF Scope</a>
+    <button id="quitBtn" class="danger">Quit launcher</button>
+  </div>
+  <div id="msg"></div>
+  <pre id="log">(no log yet)</pre>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+let busy = false;
+
+function render(s) {
+  const led = $('led'), txt = $('stateTxt');
+  if (s.running && s.app_responding) { led.className = 'led on'; txt.textContent = `Running (pid ${s.pid})`; }
+  else if (s.running) { led.className = 'led busy'; txt.textContent = `Starting... (pid ${s.pid})`; }
+  else { led.className = 'led off'; txt.textContent = 'Stopped'; }
+  $('startBtn').disabled = s.running;
+  $('stopBtn').disabled = !s.running;
+  const open = $('openBtn');
+  open.style.pointerEvents = s.app_responding ? '' : 'none';
+  open.style.opacity = s.app_responding ? '' : '.4';
+  $('log').textContent = s.log_tail.length ? s.log_tail.join('\n') : '(no log yet)';
+}
+
+async function refresh() {
+  try {
+    render(await (await fetch('/api/status', { cache: 'no-store' })).json());
+  } catch (e) {
+    $('stateTxt').textContent = 'Launcher unreachable';
+  }
+}
+
+async function act(path, label) {
+  busy = true;
+  $('msg').textContent = label + '...';
+  ['startBtn', 'stopBtn', 'quitBtn'].forEach(id => $(id).disabled = true);
+  try {
+    const r = await (await fetch(path, { method: 'POST' })).json();
+    $('msg').textContent = r.message;
+  } catch (e) {
+    $('msg').textContent = 'Request failed: ' + e;
+  } finally {
+    busy = false;
+    $('quitBtn').disabled = false;
+    await refresh();
+  }
+}
+
+$('startBtn').onclick = () => act('/api/start', 'Starting');
+$('stopBtn').onclick = () => act('/api/stop', 'Stopping');
+$('quitBtn').onclick = async () => {
+  if (!confirm('Stop the server and close the launcher?')) return;
+  try { await fetch('/api/quit', { method: 'POST' }); } catch (e) { /* helper is closing */ }
+  document.body.innerHTML = '<main><h1>PDF//SCOPE</h1><p>Launcher closed. You can close this tab.</p></main>';
+};
+
+refresh();
+setInterval(() => { if (!busy) refresh(); }, 2000);
+</script>
+</body>
+</html>

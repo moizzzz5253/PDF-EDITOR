@@ -6,6 +6,7 @@
 <title>PDF//SCOPE</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%23060b0a'/><path d='M2 16 Q8 2 12 16 T22 16 T30 16' fill='none' stroke='%233dffb0' stroke-width='3'/></svg>">
 <link rel="stylesheet" href="/style.css">
+<script src="/theme.js"></script>
 </head>
 <body>
 <header id="top">
@@ -14,6 +15,8 @@
   <div class="hstats">
     <span class="chip"><i class="led ok" id="srvLed"></i><span id="srvTxt">LINK UP</span></span>
     <span class="chip" title="Your private workspace on the server">SID <b id="sid">--------</b></span>
+    <button class="chip btn" id="themeBtn" title="Change colours">THEME</button>
+    <button class="chip btn" id="stopBtn" title="Stop the PDF server">STOP SERVER</button>
     <button class="chip btn" id="faultBadge" title="Open the last fault report">FAULTS <b id="faultN">0</b></button>
   </div>
 </header>
@@ -91,5 +94,6 @@
 <div id="toast"></div>
 <div id="lightbox" hidden></div>
 <script src="/app.js"></script>
+<script src="/server.js"></script>
 </body>
 </html>
