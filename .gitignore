@@ -1,0 +1,6 @@
+workspace/
+__pycache__/
+*.pyc
+venv/
+logs/
+launcher/server.pid
