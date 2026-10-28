@@ -89,6 +89,7 @@ b{color:var(--phos);font-weight:600}
 .pg .num{position:absolute;left:0;bottom:0;background:color-mix(in srgb, var(--bg) 85%, transparent);color:var(--phos);padding:0 6px;font-size:11px}
 .pg:hover{border-color:var(--cyan);transform:translateY(-2px)}
 .pg.sel{outline:2px solid var(--amber);outline-offset:1px;border-color:var(--amber)} .pg.sel::after{content:"";position:absolute;inset:0;background:color-mix(in srgb, var(--amber) 16%, transparent)}
+.pg.drag{cursor:grab;touch-action:none;user-select:none} .pg.dragging{cursor:grabbing;opacity:.35;outline:2px dashed var(--cyan);outline-offset:1px} .pg.moved .num{color:var(--amber)}
 .pgtools{display:flex;gap:6px;margin:0 12px 10px;align-items:center;color:var(--dim);font-size:11px}
 .empty{color:var(--dim);padding:30px 0;text-align:center;grid-column:1/-1}
 .bigkind{grid-column:1/-1;text-align:center;padding:30px;color:var(--dim)} .bigkind b{display:block;font-size:30px;letter-spacing:.2em;margin-bottom:6px}

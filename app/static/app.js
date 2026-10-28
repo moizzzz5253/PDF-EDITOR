@@ -262,7 +262,7 @@ function renderTools() {
     const o = S.ops[id];
     if (o.group !== g) { g = o.group; box.append(h('div', { class: 'grp' }, g)); }
     const incompat = kind && o.source !== 'none' && !o.accepts.includes(kind) && o.source === 'required';
-    box.append(h('button', { class: 'tool' + (S.op === id && S.tab === 'work' ? ' on' : '') + (incompat ? ' incompat' : ''), title: incompat ? `Needs ${o.accepts.join('/').toUpperCase()}; selected file is ${kind.toUpperCase()}` : o.desc, onclick: () => { S.op = id; showTab('work'); renderTools(); renderForm(); } },
+    box.append(h('button', { class: 'tool' + (S.op === id && S.tab === 'work' ? ' on' : '') + (incompat ? ' incompat' : ''), title: incompat ? `Needs ${o.accepts.join('/').toUpperCase()}; selected file is ${kind.toUpperCase()}` : o.desc, onclick: () => { const was = S.op; S.op = id; showTab('work'); renderTools(); renderForm(); if (was !== id && [was, id].includes('reorder_pages')) renderStage(); } },
       h('i', {}, ICON[id] || '◆'), h('span', {}, o.label)));
   }
   $$('#toolsPanel > .tool').forEach(b => b.classList.toggle('on', S.tab === b.dataset.tab));
@@ -293,15 +293,57 @@ function renderStage() {
   else pg.append(h('div', { class: 'bigkind' }, h('b', {}, rec.kind.toUpperCase()), rec.kind === 'docx' ? 'No page preview for Word files. Use CONVERT → Word to PDF, then edit the PDF.' : 'No preview for this file type.'));
 }
 function renderPdfPages(rec, v, opts = {}) {
-  const pg = $('#pages');
-  const tools = h('div', { class: 'pgtools' }, 'Click to select · shift-click for a range ·', h('button', { class: 'btn sm', onclick: () => { S.sel = new Set(Array.from({ length: v.pages }, (_, i) => i)); syncSel(); } }, 'ALL'), h('button', { class: 'btn sm', onclick: () => { S.sel.clear(); syncSel(); } }, 'NONE'), h('button', { class: 'btn sm', onclick: () => { S.sel = new Set(Array.from({ length: v.pages }, (_, i) => i).filter(i => !S.sel.has(i))); syncSel(); } }, 'INVERT'), h('span', { id: 'selInfo' }), h('span', { style: 'margin-left:auto' }, 'double-click = zoom'));
+  const pg = $('#pages'), reorder = S.op === 'reorder_pages';
+  const tools = reorder
+    ? h('div', { class: 'pgtools' }, 'Drag pages into the new order ·', h('button', { class: 'btn sm', onclick: () => { arrangePages(null); readOrder(); } }, 'RESET'), h('button', { class: 'btn sm', onclick: () => { arrangePages(Array.from({ length: v.pages }, (_, i) => v.pages - 1 - i)); readOrder(); } }, 'REVERSE'), h('span', { id: 'selInfo' }), h('span', { style: 'margin-left:auto' }, 'double-click = zoom'))
+    : h('div', { class: 'pgtools' }, 'Click to select · shift-click for a range ·', h('button', { class: 'btn sm', onclick: () => { S.sel = new Set(Array.from({ length: v.pages }, (_, i) => i)); syncSel(); } }, 'ALL'), h('button', { class: 'btn sm', onclick: () => { S.sel.clear(); syncSel(); } }, 'NONE'), h('button', { class: 'btn sm', onclick: () => { S.sel = new Set(Array.from({ length: v.pages }, (_, i) => i).filter(i => !S.sel.has(i))); syncSel(); } }, 'INVERT'), h('span', { id: 'selInfo' }), h('span', { style: 'margin-left:auto' }, 'double-click = zoom'));
   pg.before(tools); const old = $('.pgtools'); if (old && old !== tools) old.remove();
   for (let i = 0; i < v.pages; i++) {
-    const el = h('div', { class: 'pg' + (S.sel.has(i) ? ' sel' : ''), 'data-i': i, onclick: ev => pageClick(ev, i), ondblclick: () => zoom(`/api/files/${rec.id}/v/${v.n}/page/${i}.png?dpi=110`) },
-      h('img', { loading: 'lazy', src: `/api/files/${rec.id}/v/${v.n}/page/${i}.png?dpi=45`, alt: 'page ' + (i + 1) }), h('span', { class: 'num' }, i + 1));
+    const el = h('div', { class: 'pg' + (reorder ? ' drag' : S.sel.has(i) ? ' sel' : ''), 'data-i': i, onclick: reorder ? null : ev => pageClick(ev, i), ondblclick: () => zoom(`/api/files/${rec.id}/v/${v.n}/page/${i}.png?dpi=110`) },
+      h('img', { loading: 'lazy', draggable: 'false', src: `/api/files/${rec.id}/v/${v.n}/page/${i}.png?dpi=45`, alt: 'page ' + (i + 1) }), h('span', { class: 'num' }, i + 1));
+    if (reorder) pageDrag(el);
     pg.append(el);
   }
-  syncSel(true);
+  // A fresh render shows the file's real order, so the order field starts empty too
+  if (reorder) readOrder(); else syncSel(true);
+}
+// Reorder by dragging (pointer events, so mouse, touch and pen all work): the thumbnail
+// moves live among the others, and the order field mirrors the result
+function pageDrag(el) {
+  el.addEventListener('pointerdown', e => {
+    if (e.button !== 0) return;
+    // Listen on window, not with pointer capture: moving el in the DOM releases capture
+    const sx = e.clientX, sy = e.clientY; let started = false;
+    const move = ev => {
+      if (!started) { if (Math.hypot(ev.clientX - sx, ev.clientY - sy) < 6) return; started = true; el.classList.add('dragging'); }
+      const over = document.elementFromPoint(ev.clientX, ev.clientY)?.closest('#pages .pg');
+      if (!over || over === el) return;
+      const r = over.getBoundingClientRect(), ref = ev.clientX > r.left + r.width / 2 ? over.nextSibling : over;
+      if (ref !== el && ref !== el.nextSibling) over.parentNode.insertBefore(el, ref);
+    };
+    const up = () => {
+      window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); window.removeEventListener('pointercancel', up);
+      if (started) { el.classList.remove('dragging'); readOrder(); }
+    };
+    window.addEventListener('pointermove', move); window.addEventListener('pointerup', up); window.addEventListener('pointercancel', up);
+  });
+}
+function arrangePages(order) { // order = zero-based page indexes; null = the file's own order
+  const pg = $('#pages'), els = $$('#pages .pg'), byI = new Map(els.map(el => [+el.dataset.i, el]));
+  (order || [...byI.keys()].sort((a, b) => a - b)).forEach(i => pg.append(byI.get(i)));
+}
+function readOrder(fill = true) {
+  const els = $$('#pages .pg'), order = els.map(el => +el.dataset.i), same = order.every((x, k) => x === k);
+  els.forEach((el, k) => el.classList.toggle('moved', +el.dataset.i !== k));
+  const info = $('#selInfo'); if (info) info.textContent = same ? '' : ` new order: ${order.map(x => x + 1).join(', ')}`;
+  const f = $('#opForm [data-p=order]'); if (fill && f) f.value = same ? '' : order.map(x => x + 1).join(',');
+}
+function orderSync(el) { // typed order -> thumbnails, once it is a complete order
+  const n = $$('#pages .pg').length, raw = el.value.trim().toLowerCase(); if (!n) return;
+  let order = null;
+  if (raw === 'reverse') order = Array.from({ length: n }, (_, i) => n - 1 - i);
+  else if (raw) { order = raw.split(/[,\s]+/).filter(Boolean).map(t => +t - 1); if (order.length !== n || [...order].sort((a, b) => a - b).some((x, k) => x !== k)) return; }
+  arrangePages(order); readOrder(false);
 }
 function renderZip(rec, v) {
   api(`/api/files/${rec.id}/v/${v.n}/entries`).then(es => { const pg = $('#pages'); es.forEach(e => pg.append(h('div', { class: 'pg', title: e.name, ondblclick: () => zoom(`/api/files/${rec.id}/v/${v.n}/entry?name=${encodeURIComponent(e.name)}`) }, h('img', { loading: 'lazy', src: `/api/files/${rec.id}/v/${v.n}/entry?name=${encodeURIComponent(e.name)}` }), h('span', { class: 'num' }, e.name.replace(/^.*-p/, 'p'))))); });
@@ -342,6 +384,7 @@ function renderForm() {
       el = h('input', { type: p.type === 'int' || p.type === 'float' ? 'number' : 'text', 'data-p': p.name, value: p.default ?? '', min: p.min, max: p.max, step: p.type === 'float' ? '0.5' : '1', placeholder: p.type === 'pages' ? 'e.g. 1,3,5-8 or all' : '' });
       if (p.type === 'pages') el.addEventListener('input', () => pageHint(el, rec));
       if (S.op === 'crop_pages' && ['top', 'right', 'bottom', 'left'].includes(p.name)) el.addEventListener('input', () => cropSync());
+      if (S.op === 'reorder_pages' && p.name === 'order') el.addEventListener('input', () => orderSync(el));
     }
     f.append(el); if (p.help) f.append(h('div', { class: 'help' }, p.help)); box.append(f); fields[p.name] = { p, f };
   }

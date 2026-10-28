@@ -49,7 +49,7 @@ def rotate_pages(ctx):
            "Set the new page order. Every page must appear exactly once.",
            params=[
                {"name": "order", "type": "text", "label": "New page order", "default": "", "required": True,
-                "help": "e.g. 3,1,2 for three pages, or type reverse"},
+                "help": "Drag the pages in the page view, or type e.g. 3,1,2 for three pages, or reverse"},
            ])
 def reorder_pages(ctx):
     doc = open_pdf(ctx)

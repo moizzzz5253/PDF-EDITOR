@@ -44,7 +44,7 @@ The image includes LibreOffice, so Word to PDF works out of the box.
 | Area | What |
 |---|---|
 | Convert | PDF → JPEG/PNG (choose pages; a zip if there are several) · JPEG/PNG → PDF (pick order; fit, A4 or Letter pages with margin; also accepts an image or image zip already in the workspace) · Word (docx/doc/odt/rtf) → PDF using headless LibreOffice |
-| Pages | Remove (type a list or click pages) · add (blank, or pages from a PDF or image) · crop (drag the frame or type % / mm) · rotate 90/180/270° · reorder (`3,1,2` or `reverse`) · merge PDFs and images onto the end · extract to PDF/JPEG/PNG/TXT |
+| Pages | Remove (type a list or click pages) · add (blank, or pages from a PDF or image) · crop (drag the frame or type % / mm) · rotate 90/180/270° · reorder (drag the thumbnails, or type `3,1,2` / `reverse`) · merge PDFs and images onto the end · extract to PDF/JPEG/PNG/TXT |
 | Versions | Every edit makes a new version (v1, v2…). Nothing is overwritten. Click a version to view it or make it current again. |
 | Workspace | Drag-and-drop upload, page thumbnails, double-click to zoom, browse images inside zip results, rename, delete a file with all its versions, download any version |
 | Compare | Old vs new: pages aligned by content, pixel diff overlay, blink mode, text diff |
