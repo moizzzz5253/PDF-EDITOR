@@ -12,12 +12,37 @@ and the Step Inspector shows exactly what the server did.
 
 ## 1. Install
 
-1. Download the project as a ZIP (on GitHub: green **Code** button → **Download ZIP**).
+### Option A (recommended): download with Git
+Files that Git downloads are not marked as "downloaded from the internet", so Windows shows far fewer
+security warnings (see section 5). It also makes updating a single command.
+
+1. Press **Start**, type **PowerShell**, and open **Windows PowerShell**.
+2. Install Git (skip this if you already have it):
+   ```powershell
+   winget install --id Git.Git -e
+   ```
+   Close PowerShell and open it again afterwards, so it finds `git`.
+3. Download PDF//SCOPE into your Documents folder:
+   ```powershell
+   git clone https://github.com/moizzzz5253/PDF-EDITOR.git "$HOME\Documents\PDF-SCOPE"
+   ```
+4. Open **Documents → PDF-SCOPE** and double-click **`Start PDF Scope.vbs`**.
+
+**To update later:** quit the launcher, then run
+```powershell
+git -C "$HOME\Documents\PDF-SCOPE" pull
+```
+and start it again. Your workspace files are kept.
+
+### Option B: download the ZIP
+1. On GitHub, click the green **Code** button → **Download ZIP**.
 2. **Before you unzip it:** right-click the ZIP → **Properties** → tick **Unblock** at the bottom → **OK**.
-   This tells Windows the files are yours and avoids most security pop-ups (see section 5).
+   This removes the "downloaded from the internet" mark and avoids most security pop-ups.
 3. Right-click the ZIP → **Extract All…** and put the folder somewhere permanent, such as `Documents\PDF-SCOPE`.
    Don't run it from inside the ZIP.
 4. Double-click **`Start PDF Scope.vbs`** in the folder.
+
+If Windows blocks the app after a ZIP download, use Option A instead.
 
 The first time, a blue setup window appears. It:
 - installs Python if you don't have it (asks first; no admin rights needed),
@@ -93,32 +118,31 @@ The report contains the error code, your Windows version, the time and the last 
 
 ## 5. Windows security: Smart App Control and SmartScreen
 
-PDF//SCOPE is a free project. Its files are not signed with a paid Microsoft certificate, so Windows 11 may
-block or warn about them. Here is how to tell which message you got and what to do.
+PDF//SCOPE is a free project. Its files are not signed with a paid code-signing certificate, so Windows 11 may
+warn about them or block them.
+
+> **Please don't turn off Smart App Control, Microsoft Defender or any other Windows security feature to run
+> PDF//SCOPE.** These protect your whole computer, not just this app. If the steps below don't work, email
+> **moizshabbar30@gmail.com** with the error report instead.
 
 ### "Windows protected your PC" (blue box, SmartScreen)
-This one is only a warning. Click **More info** → **Run anyway**.
+This is a warning, not a block. If you downloaded PDF//SCOPE from the GitHub page above, you can click
+**More info** → **Run anyway**. If you're not sure where your copy came from, don't run it. Download it again
+with Option A.
 
 ### "Smart App Control blocked an app that may be unsafe" / "Part of this app has been blocked"
-Smart App Control (SAC) is stricter. It has no "Run anyway" button, and it can block the app before it even starts,
-so you may see no PDF//SCOPE error at all. It can also block files the app uses later, which shows up as error **PS-401**.
+Smart App Control (SAC) has no "Run anyway" button. It can block the app before it even starts, so you may see
+no PDF//SCOPE error at all. It can also block a file the app needs later, which shows up as error **PS-401**.
 
-**Step 1: try Unblock first (keeps SAC on).**
-1. Quit the launcher if it's running.
-2. Right-click the original ZIP → **Properties** → tick **Unblock** → **OK**.
-3. Delete the old app folder, extract the ZIP again, and double-click **Start PDF Scope**.
-
-If you no longer have the ZIP, right-click **Start PDF Scope.vbs** → **Properties** → tick **Unblock** if you see it.
-
-**Step 2: if it is still blocked, turn Smart App Control off.**
-1. Press **Start**, type **Smart App Control**, and open **Smart App Control settings**.
-   (Or: **Settings → Privacy & security → Windows Security → App & browser control → Smart App Control settings**.)
-2. Choose **Off**.
+**What to do (keeps Smart App Control on):**
+1. Quit the launcher if it's running, and delete the old app folder.
+2. Download PDF//SCOPE again with **Option A (Git)** in section 1. Files fetched by Git aren't marked as
+   downloaded from the internet, which is usually what SAC reacts to.
+   (Using a ZIP? Tick **Unblock** in the ZIP's Properties **before** extracting it.)
 3. Double-click **Start PDF Scope** again.
 
-> **Before you switch it off:** on many Windows 11 versions, once Smart App Control is turned off it
-> **cannot be turned back on without resetting Windows**. Microsoft Defender antivirus and SmartScreen
-> **stay on** and keep protecting your PC. Only turn it off if you trust where you got PDF//SCOPE from.
+**Still blocked?** Then PDF//SCOPE can't run on this computer while Smart App Control is on. Copy the error report
+(or send `logs\last-error.txt`) to **moizshabbar30@gmail.com** and wait for a fix. Don't switch SAC off.
 
 ### "There is no script engine for file extension .vbs"
 Newer Windows versions can remove VBScript. Turn it back on in **Settings → System → Optional features →
@@ -126,6 +150,12 @@ View features / More Windows features → VBScript**, then try again.
 
 ### Setup window flashes and closes / nothing happens
 Look in the `logs` folder for `last-error.txt` or `setup.log` and send them.
+
+## 6. No warranty
+
+PDF//SCOPE is free software, provided **"as is", without any warranty**, under the GPL-3.0 license
+(see sections 15 and 16 of [`LICENSE`](LICENSE)). You install and use it at your own risk and are responsible for
+your computer's settings. Only download it from https://github.com/moizzzz5253/PDF-EDITOR.
 
 ---
 
