@@ -1,3 +1,6 @@
+import bisect
+import re
+
 import pymupdf
 
 from ..errors import AppError
@@ -32,20 +35,103 @@ def open_pdf(ctx, path=None):
     return doc
 
 
+def keep_pages(ctx, doc, keep):
+    """Keep only the pages in `keep` (zero-based, in that order) without leaving dead links.
+
+    doc.select() renumbers every surviving link and bookmark and drops the ones whose page
+    is gone. A bookmark is a section heading, so instead of losing it we point it at the
+    next page that is still there - "Chapter 4" still opens chapter 4 when its first page is removed.
+    A section with no page left loses its bookmark (or keeps it as a plain heading if it has kept sub-bookmarks)."""
+    toc = doc.get_toc(simple=False)
+    first = {}
+    for new, old in enumerate(keep):
+        first.setdefault(old, new)
+    lost = [t for t in toc if t[2] >= 1 and t[2] - 1 not in first]
+    with ctx.tracer.step("TRANSFORM", f"Keep {len(keep)} page(s), repair links",
+                         "doc.select() rebuilds the page tree from the pages you keep. Links and bookmarks that point at kept pages are renumbered; "
+                         "links to removed pages are deleted so nothing is left that clicks to nowhere. "
+                         "Bookmarks whose page was removed are moved to the next kept page of the same section.",
+                         f"doc.select({len(keep)} pages); doc.set_toc(redirected)") as s:
+        doc.select(keep)
+        s["detail"] = f"{len(toc)} bookmark(s)"
+        if not lost:
+            return
+        kept = sorted(first)
+        rows, moved = [], 0
+        for n_, (lvl, title, pno, dest) in enumerate(toc):
+            if pno >= 1 and pno - 1 not in first:
+                # the section runs until the next bookmark at the same or a higher level
+                end = next((t[2] - 1 for t in toc[n_ + 1:] if t[0] <= lvl and t[2] - 1 > pno - 1), float("inf"))
+                i = bisect.bisect_right(kept, pno - 1)
+                if i < len(kept) and kept[i] < end:
+                    dest = {k: v for k, v in dest.items() if k in ("color", "bold", "italic", "collapse")}
+                    dest["kind"] = pymupdf.LINK_GOTO
+                    pno = first[kept[i]] + 1
+                    moved += 1
+                else:
+                    pno = None
+            elif pno >= 1:
+                pno = first[pno - 1] + 1
+            rows.append([lvl, title, pno, dest])
+        # drop sections with nothing left, unless a sub-bookmark survives (then keep a heading with no target)
+        fixed, child_kept = [], {}
+        for lvl, title, pno, dest in reversed(rows):
+            has_child = any(v for k, v in child_kept.items() if k > lvl)
+            child_kept = {k: v for k, v in child_kept.items() if k <= lvl}
+            if pno is None and has_child:
+                pno, dest = -1, {"kind": pymupdf.LINK_NONE}
+            if pno is not None:
+                fixed.append([lvl, title, pno, dest])
+            child_kept[lvl] = child_kept.get(lvl, False) or pno is not None or has_child
+        fixed.reverse()
+        s["detail"] = f"{len(toc)} bookmark(s): {moved} moved to the next kept page, {len(toc) - len(fixed)} dropped (section fully removed)"
+        doc.set_toc(fixed, collapse=0)
+
+
+URLISH = re.compile(r"^(https?://|www\.|wa\.me/|mailto:)", re.I)
+
+
+def fix_launch_urls(doc):
+    """Word sometimes stores web addresses as 'launch a file' actions, which viewers block. Turn them back into web links."""
+    n = 0
+    for page in doc:
+        for l in page.get_links():
+            f = (l.get("file") or "").strip()
+            if l["kind"] == pymupdf.LINK_LAUNCH and URLISH.match(f):
+                page.delete_link(l)
+                uri = f if re.match(r"^(https?:|mailto:)", f, re.I) else "https://" + f
+                page.insert_link({"kind": pymupdf.LINK_URI, "from": l["from"], "uri": uri})
+                n += 1
+    return n
+
+
 def save_pdf(ctx, doc, out):
     with ctx.tracer.step("WRITE", "Write new PDF version",
-                         "The edited page tree is serialised to a new file. garbage=3 drops unused objects, deflate compresses streams - this is why file sizes can shrink after removing pages. "
+                         "The edited page tree is serialised to a new file. garbage=1 drops objects no page uses any more (removed pages, their images and fonts), "
+                         "deflate compresses streams and object streams pack the small objects, so the file stays as compact as the original. "
+                         "(garbage=3 also hunts for duplicate objects, which takes hours on documents with thousands of pages.) "
                          "The previous version is kept untouched so you can compare or roll back.",
-                         f"doc.save('{out.name}', garbage=3, deflate=True)") as s:
-        doc.save(out, garbage=3, deflate=True)
-        s["detail"] = f"{out.stat().st_size:,} bytes"
+                         f"doc.save('{out.name}', garbage=1, deflate=True, use_objstms=1)") as s:
+        fixed = fix_launch_urls(doc)
+        doc.save(out, garbage=1, deflate=True, use_objstms=1)
+        s["detail"] = f"{out.stat().st_size:,} bytes" + (f", {fixed} launch link(s) turned into web links" if fixed else "")
     with ctx.tracer.step("VERIFY", "Re-open the output to prove it is valid",
-                         "A file that was written is not necessarily a file that opens. We re-open it and count the pages.",
-                         f"pymupdf.open('{out.name}').page_count") as s:
+                         "A file that was written is not necessarily a file that opens. We re-open it, count the pages, and check that every internal link and bookmark points at a real page.",
+                         f"pymupdf.open('{out.name}').page_count; page.get_links(); get_toc()") as s:
         chk = pymupdf.open(out)
-        s["detail"] = f"{chk.page_count} page(s) confirmed"
         if chk.page_count != len(doc):
             raise AppError("E_VERIFY", "Output page count mismatch", f"Expected {len(doc)} pages, re-opened file has {chk.page_count}.", "This is a bug - copy the diagnostic report.", status=500)
+        links = dead = 0
+        for page in chk:
+            for l in page.get_links():
+                if l["kind"] in (pymupdf.LINK_GOTO, pymupdf.LINK_NAMED):
+                    links += 1
+                    dead += not 0 <= l.get("page", -1) < chk.page_count
+        toc = chk.get_toc(simple=False)
+        bad_bm = sum(1 for t in toc if t[2] < 1 and t[3].get("kind") == pymupdf.LINK_GOTO)
+        s["detail"] = f"{chk.page_count} page(s) confirmed, {links} internal link(s), {len(toc)} bookmark(s)"
+        if dead or bad_bm:
+            s["detail"] += f" - WARNING: {dead} link(s) and {bad_bm} bookmark(s) point nowhere"
         chk.close()
 
 
@@ -63,13 +149,10 @@ def remove_pages(ctx):
             raise AppError("E_REMOVE_ALL", "Cannot remove every page",
                            f"You selected all {n} page(s). A PDF with zero pages is invalid.",
                            "Leave at least one page, or delete the file instead.")
-    with ctx.tracer.step("TRANSFORM", f"Delete {len(rm)} page(s)",
-                         "Page objects are unlinked from the page tree. Content used only by those pages becomes garbage that is purged when saving.",
-                         f"doc.delete_pages({rm})"):
-        doc.delete_pages(rm)
+    kept = [i for i in range(n) if i not in set(rm)]
+    keep_pages(ctx, doc, kept)
     out = ctx.out("out.pdf")
     save_pdf(ctx, doc, out)
-    kept = [i for i in range(n) if i not in set(rm)]
     return {"mode": "version", "path": out, "message": f"Removed {len(rm)} page(s)",
             "page_map": [{"from": i, "state": "kept"} for i in kept], "removed": rm, "kind": "pdf"}
 
@@ -120,10 +203,11 @@ def add_pages(ctx):
             s["detail"] = f"{len(src)} page(s) available"
         idx = parse_pages(p.get("insert_pages"), len(src))
         with ctx.tracer.step("TRANSFORM", f"Copy {len(idx)} page(s) in",
-                             "Pages are copied object-by-object (fonts, images and all) into this document at the chosen position.",
-                             f"doc.insert_pdf(src, from_page=i, to_page=i, start_at=at+k)  # x{len(idx)}"):
-            for k, i in enumerate(idx):
-                doc.insert_pdf(src, from_page=i, to_page=i, start_at=at + k)
+                             "Pages are copied object-by-object (fonts, images and all) into this document at the chosen position. "
+                             "They are copied in one go, so links between the inserted pages keep working.",
+                             f"src.select({idx}); doc.insert_pdf(src, start_at=at)"):
+            src.select(idx)
+            doc.insert_pdf(src, start_at=at)
         added = len(idx)
     out = ctx.out("out.pdf")
     save_pdf(ctx, doc, out)
@@ -196,14 +280,10 @@ def extract_pages(ctx):
     idx = parse_pages(p.get("pages"), len(doc), required=True)
     fmt = p.get("format", "pdf")
     if fmt == "pdf":
-        new = pymupdf.open()
-        with ctx.tracer.step("TRANSFORM", f"Copy {len(idx)} page(s) into a new document",
-                             "A fresh empty PDF is created and the chosen pages are copied in the order you listed them (so '3,1' puts page 3 first).",
-                             f"new.insert_pdf(doc, from_page=i, to_page=i)  # x{len(idx)}"):
-            for i in idx:
-                new.insert_pdf(doc, from_page=i, to_page=i)
+        # the source file on disk is untouched; only this in-memory copy is cut down
+        keep_pages(ctx, doc, idx)
         out = ctx.out("extract.pdf")
-        save_pdf(ctx, new, out)
+        save_pdf(ctx, doc, out)
         res = {"path": out, "name": f"{ctx.base}-extract.pdf", "kind": "pdf"}
     elif fmt == "txt":
         with ctx.tracer.step("TRANSFORM", "Read text layer",

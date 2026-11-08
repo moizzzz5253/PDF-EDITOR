@@ -103,6 +103,18 @@ def _open_any(ctx, path):
     return src
 
 
+def _named_to_goto(src):
+    """Rewrite links that jump to a named destination as direct page links, so they survive insert_pdf."""
+    n = 0
+    for page in src:
+        for l in page.get_links():
+            if l["kind"] == pymupdf.LINK_NAMED and 0 <= l.get("page", -1) < len(src):
+                page.delete_link(l)
+                page.insert_link({"kind": pymupdf.LINK_GOTO, "from": l["from"], "page": l["page"], "to": l.get("to", pymupdf.Point(0, 0))})
+                n += 1
+    return n
+
+
 @operation("merge_pdfs", "Merge PDFs", "PAGES",
            "Add PDFs or images to the end of the selected file. The selected file stays first.",
            params=[
@@ -118,13 +130,23 @@ def merge_pdfs(ctx):
     doc = open_pdf(ctx)
     base_n = len(doc)
     page_map = [{"from": i, "state": "kept"} for i in range(base_n)]
+    toc = doc.get_toc(simple=False)
     for path in extras:
         src = _open_any(ctx, path)
         with ctx.tracer.step("TRANSFORM", f"Append {len(src)} page(s) from {path.name}",
-                             "Pages are copied object-by-object (fonts and images included) to the end of the document.",
-                             f"doc.insert_pdf(src)"):
+                             "Pages are copied object-by-object (fonts and images included) to the end of the document. "
+                             "Links that jump by name (Word/LaTeX style) are first turned into direct page links, because the name list is not copied; "
+                             "the file's bookmarks are added after the existing ones.",
+                             f"doc.insert_pdf(src); doc.set_toc(toc + src_toc)") as s:
+            at = len(doc)
+            named = _named_to_goto(src)
             doc.insert_pdf(src)
+            src_toc = src.get_toc(simple=False)
+            toc += [[lvl, title, pno + at if pno >= 1 else pno, dest] for lvl, title, pno, dest in src_toc]
+            s["detail"] = f"{named} named link(s) converted, {len(src_toc)} bookmark(s) added"
         page_map += [{"from": None, "state": "new"} for _ in range(len(src))]
+    if toc and len(toc) != len(doc.get_toc()):
+        doc.set_toc(toc, collapse=0)
     out = ctx.out("out.pdf")
     save_pdf(ctx, doc, out)
     added = len(doc) - base_n

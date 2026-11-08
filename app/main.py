@@ -18,7 +18,7 @@ from PIL import Image, ImageDraw
 import pymupdf
 
 from . import compare as cmp
-from . import share, sysinfo
+from . import nav, share, sysinfo
 from .config import APP_VERSION, BASE_DIR, settings
 from .errors import AppError, error_payload
 from .ops import OPERATIONS, OpContext
@@ -275,6 +275,31 @@ def api_entry(fid: str, n: int, name: str, request: Request):
 def api_raw(fid: str, n: int, request: Request):
     st = store_of(request)
     return FileResponse(st.version_path(st.get(fid), n))
+
+
+def _pdf_version(request, fid, n):
+    st = store_of(request)
+    rec = st.get(fid)
+    if rec["kind"] != "pdf":
+        raise AppError("E_WRONG_KIND", "Navigation needs a PDF", f"'{rec['name']}' is {rec['kind'].upper()}.", "Select a PDF file.")
+    cache = st.root / rec["id"] / "cache"
+    cache.mkdir(exist_ok=True)
+    return st, rec, st.version_path(rec, n), cache
+
+
+@app.get("/api/files/{fid}/v/{n}/nav")
+def api_nav(fid: str, n: int, request: Request):
+    st, rec, p, cache = _pdf_version(request, fid, n)
+    t = time.perf_counter()
+    out = nav.outline(p, cache / f"v{n}_nav.json")
+    log(st.sid, "info", "nav", f"{rec['name']} v{n}: {len(out['bookmarks'])} bookmark(s), {len(out['links'])} link(s)", round((time.perf_counter() - t) * 1000, 1))
+    return out
+
+
+@app.get("/api/files/{fid}/v/{n}/info/{i}")
+def api_page_info(fid: str, n: int, i: int, request: Request):
+    _, _, p, _ = _pdf_version(request, fid, n)
+    return nav.page_info(p, i)
 
 
 # ---------------------------------------------------------------- operations

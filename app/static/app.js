@@ -270,13 +270,13 @@ function renderTools() {
 $$('#toolsPanel > .tool').forEach(b => b.onclick = () => showTab(b.dataset.tab));
 function showTab(t) {
   S.tab = t; $('#fault').hidden = true; $$('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === t)); $$('.tab').forEach(x => x.classList.toggle('on', x.id === 'tab-' + t));
-  if (t === 'compare') initCompare(); if (t === 'share') renderShare(); renderTools();
+  if (t === 'compare') initCompare(); if (t === 'share') renderShare(); if (t === 'nav') renderNav(); renderTools(); renderDock();
 }
 $$('#tabs button').forEach(b => b.onclick = () => showTab(b.dataset.tab));
 
 // ------------------------------------------------------------------ workbench: versions + pages
 function renderStage() {
-  const rec = curRec(), pg = $('#pages'), vs = $('#versions'); pg.innerHTML = ''; vs.innerHTML = '';
+  const rec = curRec(), pg = $('#pages'), vs = $('#versions'); stopVirtual(); pg.innerHTML = ''; vs.innerHTML = '';
   if (!rec) { $('#stageTitle').textContent = 'NO FILE SELECTED'; $('#stageInfo').textContent = ''; pg.append(h('div', { class: 'empty' }, 'Upload a PDF, Word file or image to begin. Every edit creates a new version, so nothing is lost.')); return; }
   const v = verRec(); $('#stageTitle').textContent = rec.name; $('#stageInfo').textContent = `${fmtBytes(v.size)} · ${v.pages != null ? v.pages + ' pages · ' : ''}v${v.n} of ${rec.versions.length} · md5 ${v.md5.slice(0, 8)}`;
   rec.versions.forEach((x, i) => {
@@ -296,16 +296,61 @@ function renderPdfPages(rec, v, opts = {}) {
   const pg = $('#pages'), reorder = S.op === 'reorder_pages';
   const tools = reorder
     ? h('div', { class: 'pgtools' }, 'Drag pages into the new order ·', h('button', { class: 'btn sm', onclick: () => { arrangePages(null); readOrder(); } }, 'RESET'), h('button', { class: 'btn sm', onclick: () => { arrangePages(Array.from({ length: v.pages }, (_, i) => v.pages - 1 - i)); readOrder(); } }, 'REVERSE'), h('span', { id: 'selInfo' }), h('span', { style: 'margin-left:auto' }, 'double-click = zoom'))
-    : h('div', { class: 'pgtools' }, 'Click to select · shift-click for a range ·', h('button', { class: 'btn sm', onclick: () => { S.sel = new Set(Array.from({ length: v.pages }, (_, i) => i)); syncSel(); } }, 'ALL'), h('button', { class: 'btn sm', onclick: () => { S.sel.clear(); syncSel(); } }, 'NONE'), h('button', { class: 'btn sm', onclick: () => { S.sel = new Set(Array.from({ length: v.pages }, (_, i) => i).filter(i => !S.sel.has(i))); syncSel(); } }, 'INVERT'), h('span', { id: 'selInfo' }), h('span', { style: 'margin-left:auto' }, 'double-click = zoom'));
+    : h('div', { class: 'pgtools' }, 'Click to select · shift-click for a range ·', h('button', { class: 'btn sm', onclick: () => { S.sel = new Set(Array.from({ length: v.pages }, (_, i) => i)); syncSel(); } }, 'ALL'), h('button', { class: 'btn sm', onclick: () => { S.sel.clear(); syncSel(); } }, 'NONE'), h('button', { class: 'btn sm', onclick: () => { S.sel = new Set(Array.from({ length: v.pages }, (_, i) => i).filter(i => !S.sel.has(i))); syncSel(); } }, 'INVERT'), h('span', { id: 'selInfo' }),
+        h('input', { type: 'number', class: 'goto', min: 1, max: v.pages, placeholder: 'go to p.', title: 'Type a page number and press Enter', onkeydown: e => { if (e.key === 'Enter' && e.target.value) gotoTile(+e.target.value - 1); } }),
+        h('span', {}, 'double-click = zoom'));
   pg.before(tools); const old = $('.pgtools'); if (old && old !== tools) old.remove();
-  for (let i = 0; i < v.pages; i++) {
-    const el = h('div', { class: 'pg' + (reorder ? ' drag' : S.sel.has(i) ? ' sel' : ''), 'data-i': i, onclick: reorder ? null : ev => pageClick(ev, i), ondblclick: () => zoom(`/api/files/${rec.id}/v/${v.n}/page/${i}.png?dpi=110`) },
-      h('img', { loading: 'lazy', draggable: 'false', src: `/api/files/${rec.id}/v/${v.n}/page/${i}.png?dpi=45`, alt: 'page ' + (i + 1) }), h('span', { class: 'num' }, i + 1));
-    if (reorder) pageDrag(el);
-    pg.append(el);
-  }
+  const tile = i => h('div', { class: 'pg' + (reorder ? ' drag' : S.sel.has(i) ? ' sel' : ''), 'data-i': i, onclick: reorder ? null : ev => pageClick(ev, i), ondblclick: () => zoom(`/api/files/${rec.id}/v/${v.n}/page/${i}.png?dpi=110`) },
+    h('img', { loading: 'lazy', draggable: 'false', src: `/api/files/${rec.id}/v/${v.n}/page/${i}.png?dpi=45`, alt: 'page ' + (i + 1) }), h('span', { class: 'num' }, i + 1));
+  if (!reorder) { virtualGrid(v.pages, tile); syncSel(true); return; }
+  if (v.pages > 400) tools.append(h('span', { class: 'hint err', style: 'margin:0 0 0 8px' }, `${v.pages} pages: dragging is slow at this size, typing the order is faster`));
+  for (let i = 0; i < v.pages; i++) { const el = tile(i); pageDrag(el); pg.append(el); }
   // A fresh render shows the file's real order, so the order field starts empty too
-  if (reorder) readOrder(); else syncSel(true);
+  readOrder();
+}
+
+// Virtual grid: only the rows on screen (plus a margin) exist in the page, so a 5,000-page
+// PDF scrolls like a 20-page one. Tiles keep their data-i, so selection, zoom and the edit
+// animations work unchanged; code that needs an off-screen tile asks VG.scrollTo first.
+const VG = { stop: null, scrollTo: null };
+function stopVirtual() {
+  if (VG.stop) VG.stop(); VG.stop = VG.scrollTo = null;
+  const pg = $('#pages'); for (const k of ['gridTemplateColumns', 'gridAutoRows', 'height', 'paddingTop']) pg.style[k] = '';
+}
+function virtualGrid(n, tile) {
+  const pg = $('#pages'), center = $('#center'), GAP = 10, MIN = 118, BUF = 3, live = new Map();
+  let cols = 1, rowH = 1, tileH = 1, range = '', raf = 0, lastW = 0;
+  function layout() {
+    const W = pg.clientWidth; if (!W || W === lastW) return; lastW = W;
+    cols = Math.max(1, Math.floor((W + GAP) / (MIN + GAP)));
+    tileH = (W - GAP * (cols - 1)) / cols * 4 / 3; rowH = tileH + GAP;  // tiles are 3:4, like the CSS
+    pg.style.gridTemplateColumns = `repeat(${cols}, minmax(0, 1fr))`; pg.style.gridAutoRows = tileH + 'px';
+    pg.style.height = Math.ceil(n / cols) * rowH - GAP + 'px';
+    range = ''; draw();
+  }
+  function draw() {
+    raf = 0; if (!lastW) return; const top = pg.getBoundingClientRect().top;
+    const r0 = Math.max(0, Math.floor(-top / rowH) - BUF), r1 = Math.floor((innerHeight - top) / rowH) + BUF;
+    const a = Math.min(n, r0 * cols), b = Math.min(n, (r1 + 1) * cols);
+    if (`${a}-${b}` === range) return; range = `${a}-${b}`;
+    pg.style.paddingTop = r0 * rowH + 'px';
+    const want = [];
+    for (let i = a; i < b; i++) { let el = live.get(i); if (!el) { el = tile(i); live.set(i, el); } want.push(el); }
+    for (const [i, el] of live) if (i < a || i >= b) live.delete(i);  // dropped tiles cancel their image request
+    pg.replaceChildren(...want);  // re-used tiles keep their loaded image
+  }
+  const onScroll = () => { if (!raf) raf = requestAnimationFrame(draw); };
+  // only a width change re-lays out, and on the next frame: changing the height inside the
+  // observer callback would trigger it again ("ResizeObserver loop" in the console)
+  const ro = new ResizeObserver(() => requestAnimationFrame(layout)); ro.observe(pg);
+  center.addEventListener('scroll', onScroll, { passive: true }); window.addEventListener('scroll', onScroll, { passive: true }); window.addEventListener('resize', onScroll);
+  VG.stop = () => { ro.disconnect(); center.removeEventListener('scroll', onScroll); window.removeEventListener('scroll', onScroll); window.removeEventListener('resize', onScroll); cancelAnimationFrame(raf); live.clear(); };
+  VG.scrollTo = i => { // put page i in the middle of the screen and make sure its tile exists
+    const delta = pg.getBoundingClientRect().top + Math.floor(i / cols) * rowH + tileH / 2 - innerHeight / 2;
+    if (center.scrollHeight > center.clientHeight && getComputedStyle(center).overflowY !== 'visible') center.scrollTop += delta; else window.scrollBy(0, delta);
+    draw();
+  };
+  layout();
 }
 // Reorder by dragging (pointer events, so mouse, touch and pen all work): the thumbnail
 // moves live among the others, and the order field mirrors the result
@@ -357,6 +402,14 @@ function syncSel(noFill) {
   $$('#pages .pg').forEach(el => el.classList.toggle('sel', S.sel.has(+el.dataset.i)));
   const info = $('#selInfo'); if (info) info.textContent = S.sel.size ? ` selected: ${compressPages(S.sel)}` : '';
   if (!noFill) fillPagesField();
+  dockSync();
+}
+function gotoTile(i) { // scroll the thumbnail grid to page i (zero-based) and flash it
+  const n = verRec()?.pages; if (n == null || i < 0 || i >= n) return toast(`no page ${i + 1} in this version`, 'err');
+  if (VG.scrollTo) VG.scrollTo(i);
+  const el = $(`#pages .pg[data-i="${i}"]`); if (!el) return;
+  if (!VG.scrollTo) el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash');
 }
 function fillPagesField() { const f = $('#opForm [data-p=pages]'); if (f && S.sel.size) { f.value = compressPages(S.sel); f.dispatchEvent(new Event('input')); } }
 function zoom(src) { const lb = $('#lightbox'); lb.innerHTML = ''; lb.append(h('img', { src })); lb.hidden = false; lb.onclick = () => lb.hidden = true; }
@@ -382,17 +435,52 @@ function renderForm() {
       if (p.ws) { const sel = h('select', { 'data-ws': p.name }, h('option', { value: '' }, '- or pick from workspace -'), ...S.files.filter(x => x.kind === 'pdf' && x.id !== S.cur).map(x => h('option', { value: x.id }, x.name))); el.append(h('div', { style: 'height:5px' }), sel); }
     } else {
       el = h('input', { type: p.type === 'int' || p.type === 'float' ? 'number' : 'text', 'data-p': p.name, value: p.default ?? '', min: p.min, max: p.max, step: p.type === 'float' ? '0.5' : '1', placeholder: p.type === 'pages' ? 'e.g. 1,3,5-8 or all' : '' });
-      if (p.type === 'pages') el.addEventListener('input', () => pageHint(el, rec));
+      if (p.type === 'pages') el.addEventListener('input', () => { pageHint(el, rec); dockSync(); });
       if (S.op === 'crop_pages' && ['top', 'right', 'bottom', 'left'].includes(p.name)) el.addEventListener('input', () => cropSync());
       if (S.op === 'reorder_pages' && p.name === 'order') el.addEventListener('input', () => orderSync(el));
     }
     f.append(el); if (p.help) f.append(h('div', { class: 'help' }, p.help)); box.append(f); fields[p.name] = { p, f };
   }
   const updateShow = () => { for (const { p, f } of Object.values(fields)) { if (!p.show_if) continue; f.style.display = Object.entries(p.show_if).every(([k, v]) => { const cur = readForm()[k]; return Array.isArray(v) ? v.includes(cur) : cur === v; }) ? '' : 'none'; } };
-  if (S.op === 'crop_pages') box.insertBefore(cropWidget(rec), fields.unit.f);
-  box.append(h('button', { class: 'btn-go', id: 'go', onclick: runOp }, 'EXECUTE'));
-  updateShow(); fillPagesField();
+  if (S.op === 'crop_pages') {
+    box.insertBefore(cropWidget(rec), fields.unit.f);
+    if (rec && rec.kind === 'pdf') box.insertBefore(h('button', { class: 'btn ce-open', onclick: openCropEditor }, '⤢ OPEN ZOOMED CROP EDITOR'), fields.unit.f);
+  }
+  box.append(h('button', { class: 'btn-go', id: 'go', onclick: runOp }, 'EXECUTE'), h('div', { class: 'help', style: 'margin:-6px 12px 0;text-align:center' }, 'Ctrl+Enter runs it from anywhere'));
+  updateShow(); fillPagesField(); renderDock();
 }
+
+// ------------------------------------------------------------------ dock: EXECUTE always in reach
+// Long documents push the form far below the thumbnails. This bar appears at the bottom of
+// the screen whenever the form's own EXECUTE button is scrolled out of view.
+let dockObs = null;
+function renderDock() {
+  const dock = $('#dock'), o = S.ops[S.op]; dock.innerHTML = '';
+  if (dockObs) { dockObs.disconnect(); dockObs = null; }
+  const go = $('#go');
+  if (!o || S.tab !== 'work' || !go) { dock.hidden = true; return; }
+  const pf = $('#opForm [data-p=pages]');
+  dock.append(...[
+    h('span', { class: 'dk-tool' }, h('i', {}, ICON[o.id] || '◆'), o.label),
+    pf ? h('label', { class: 'dk-pages' }, 'pages', h('input', { type: 'text', id: 'dockPages', value: pf.value, placeholder: pf.placeholder,
+      oninput: e => { pf.value = e.target.value; pf.dispatchEvent(new Event('input')); } })) : null,
+    h('span', { id: 'dockSel', class: 'dk-sel' }),
+    S.op === 'crop_pages' && curRec()?.kind === 'pdf' ? h('button', { class: 'btn sm', onclick: openCropEditor }, '⤢ CROP EDITOR') : null,
+    h('button', { class: 'btn sm', title: 'All settings for this tool', onclick: () => $('#opForm').scrollIntoView({ block: 'start', behavior: 'smooth' }) }, '⚙ SETTINGS'),
+    h('button', { class: 'btn-go dk-go', id: 'dockGo', onclick: runOp, disabled: S.busy }, S.busy ? 'EXECUTING…' : 'EXECUTE')].filter(Boolean));
+  dockSync();
+  dockObs = new IntersectionObserver(([e]) => { dock.hidden = e.isIntersecting; });
+  dockObs.observe(go);
+}
+function dockSync() {
+  const pf = $('#opForm [data-p=pages]'), dp = $('#dockPages'), sel = $('#dockSel'); if (!sel) return;
+  if (pf && dp && document.activeElement !== dp) dp.value = pf.value;
+  const hint = pf && pf.parentElement.querySelector('.hint');
+  sel.className = 'dk-sel' + (hint && hint.classList.contains('err') ? ' err' : '');
+  sel.textContent = hint ? hint.textContent : S.sel.size ? `selected: ${compressPages(S.sel)}` : '';
+}
+function setGo(busy) { for (const b of [$('#go'), $('#dockGo')]) if (b) { b.disabled = busy; b.textContent = busy ? 'EXECUTING…' : 'EXECUTE'; } }
+document.addEventListener('keydown', e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && S.tab === 'work' && S.ops[S.op] && $('#cropModal').hidden) { e.preventDefault(); runOp(); } });
 function pageHint(el, rec) {
   let hint = el.parentElement.querySelector('.hint'); if (!hint) { hint = h('div', { class: 'hint' }); el.parentElement.append(hint); }
   const v = verRec(); if (!v || v.pages == null) return hint.remove();
@@ -402,6 +490,7 @@ function parseSpec(spec, n) { // mirror of server parse_pages, for instant feedb
   spec = (spec || '').trim().toLowerCase(); if (!spec || spec === 'all') return Array.from({ length: n }, (_, i) => i);
   const out = [];
   for (const tok of spec.split(/[,\s;]+/).filter(Boolean)) {
+    if (tok === 'odd' || tok === 'even') { for (let k = tok === 'odd' ? 0 : 1; k < n; k += 2) out.push(k); continue; }
     const m = tok.match(/^(\d+|last)?(-)?(\d+|last)?$/); if (!m || !(m[1] || m[3])) throw new Error(`can't read '${tok}'`);
     const val = x => x === 'last' ? n : +x, lo = m[2] ? (m[1] ? val(m[1]) : 1) : val(m[1]), hi = m[2] ? (m[3] ? val(m[3]) : n) : lo;
     for (const p of [lo, hi]) if (p < 1 || p > n) throw new Error(`page ${p} is outside 1-${n}`);
@@ -448,7 +537,7 @@ async function runOp() {
   if (rec && o.source !== 'none') { fd.append('file_id', rec.id); fd.append('version', S.ver); }
   fd.append('params', JSON.stringify(params));
   $$('#opForm [data-type=file] input[type=file]').forEach(inp => [...inp.files].forEach(f => fd.append(inp.parentElement.dataset.p, f)));
-  $('#fault').hidden = true; S.busy = true; $('#go').disabled = true; $('#go').textContent = 'EXECUTING…'; pipe.begin(o.label); showTrace(null); $('#insp').innerHTML = '<div class="nodeinfo">waiting for the server… (request sent, the stages light up as soon as it answers)</div>';
+  $('#fault').hidden = true; S.busy = true; setGo(true); pipe.begin(o.label); showTrace(null); $('#insp').innerHTML = '<div class="nodeinfo">waiting for the server… (request sent, the stages light up as soon as it answers)</div>';
   const before = rec && verRec();
   try {
     const r = await api(`/api/ops/${o.id}`, { method: 'POST', form: fd, quiet: true });
@@ -461,7 +550,7 @@ async function runOp() {
     else pipe.quick('failed before reaching the server', false);
     showFault(d.error, null);
   } finally {
-    S.busy = false; const go = $('#go'); if (go) { go.disabled = false; go.textContent = 'EXECUTE'; } refreshSystem(); pollLogs();
+    S.busy = false; setGo(false); dockSync(); refreshSystem(); pollLogs();
   }
 }
 async function animateEdit(r, before) {
@@ -474,7 +563,7 @@ async function animateEdit(r, before) {
     // Phase 2: swap in the new version; new pages fly in
     S.sel.clear(); S.cur = r.file.id; S.ver = r.to_version; S.files = S.files.map(f => f.id === r.file.id ? r.file : f); S.lastAnchor = null;
     renderFiles(); renderStage(); renderTools();
-    $$('#pages .pg').forEach((el, i) => { const m = pm && pm[i]; el.classList.add(m && m.state === 'new' ? 'enter-new' : 'settle'); });
+    $$('#pages .pg').forEach(el => { const m = pm && pm[+el.dataset.i]; el.classList.add(m && m.state === 'new' ? 'enter-new' : 'settle'); });
     const form = $('#opForm [data-p=pages]'); if (form && S.op !== 'crop_pages') form.value = '';
     pageHintRefresh();
   } else {
@@ -484,6 +573,200 @@ async function animateEdit(r, before) {
   }
 }
 function pageHintRefresh() { const f = $('#opForm [data-p=pages]'); if (f) f.dispatchEvent(new Event('input')); const cw = $('#cropw'); if (cw) { const img = cw.querySelector('img'), rec = curRec(), v = verRec(); if (img && v) img.src = `/api/files/${rec.id}/v/${v.n}/page/0.png?dpi=60`; } }
+
+// ------------------------------------------------------------------ navigate: bookmarks + links
+// Read-only: lists what the PDF links to and shows the page, with its links clickable on top.
+// Failures stay inside this tab; editing is never affected.
+const NAV = { key: null, data: null, page: 0, back: [], q: '', kind: 'all', shown: 300, token: 0 };
+async function renderNav() {
+  const root = $('#tab-nav'), rec = curRec(), v = verRec(), token = ++NAV.token; root.innerHTML = '';
+  const panel = h('div', { class: 'panel' }, h('h3', {}, h('span', {}, 'NAVIGATE · BOOKMARKS & LINKS'), h('em', {}, rec ? `${rec.name} · v${S.ver}` : '')));
+  root.append(panel);
+  if (!rec || rec.kind !== 'pdf' || !v) { panel.append(h('div', { class: 'empty', style: 'margin:20px' }, 'Select a PDF to list its bookmarks and links.')); return; }
+  const key = `${rec.id}:${v.n}`;
+  if (NAV.key !== key) Object.assign(NAV, { key, data: null, page: 0, back: [], q: '', kind: 'all', shown: 300 });
+  if (!NAV.data) {
+    const wait = h('div', { class: 'hint', style: 'margin:12px' }, `reading bookmarks and links on ${v.pages} page(s)… large files take a few seconds the first time, then it is instant`);
+    panel.append(wait); pipe.begin('navigate');
+    // reopening the tab while it loads reuses the same request instead of starting another scan
+    if (NAV.pendingKey !== key) { NAV.pendingKey = key; NAV.pending = api(`/api/files/${rec.id}/v/${v.n}/nav`, { quiet: true }); NAV.pending.catch(() => { if (NAV.pendingKey === key) NAV.pendingKey = null; }); }
+    let d; try { d = await NAV.pending; }
+    catch (e) { if (token !== NAV.token) return; pipe.quick('navigate: could not read links', false); wait.className = 'hint err'; wait.textContent = 'Could not read the links: ' + (e.payload?.error?.cause || e.message) + '. Editing is not affected.'; return; }
+    if (token !== NAV.token || NAV.key !== key) return; // user moved on while it loaded
+    NAV.data = d; wait.remove();
+    pipe.quick(`navigate: ${d.bookmarks.length} bookmark(s), ${d.links.length} link(s) on ${d.pages} page(s)`);
+  }
+  const d = NAV.data, list = h('div', { class: 'navlist' }), view = h('div', { class: 'navview' });
+  const counts = { all: d.links.length, page: 0, web: 0, file: 0 }; d.links.forEach(l => counts[l.kind]++);
+  const q = h('input', { type: 'text', placeholder: 'search text, page number or address…', value: NAV.q, oninput: () => { NAV.q = q.value; NAV.shown = 300; fill(); } });
+  const seg = h('div', { class: 'seg' }, ...[['all', 'all'], ['page', 'to pages'], ['web', 'web'], ['file', 'files']].map(([k, t]) => h('button', { type: 'button', class: NAV.kind === k ? 'on' : '', onclick: () => { NAV.kind = k; NAV.shown = 300; $$('button', seg).forEach((b, i) => b.classList.toggle('on', ['all', 'page', 'web', 'file'][i] === k)); fill(); } }, `${t} ${counts[k]}`)));
+  const items = h('div', { class: 'navitems' });
+  list.append(q, seg, items);
+  panel.append(h('div', { class: 'navbody' }, list, view));
+  const pg = n => n == null ? 'removed' : 'p.' + (n + 1);
+  function fill() {
+    items.innerHTML = '';
+    const s = NAV.q.trim().toLowerCase(), num = /^\d+$/.test(s) ? +s - 1 : null;
+    const hit = (txt, ...pages) => !s || (txt || '').toLowerCase().includes(s) || (num != null && pages.includes(num));
+    const bms = d.bookmarks.filter(b => NAV.kind === 'all' && hit(b.title, b.page));
+    if (bms.length) {
+      items.append(h('div', { class: 'navh' }, `BOOKMARKS ${bms.length}`));
+      bms.forEach(b => items.append(h('div', { class: 'navi bm' + (b.page == null ? ' dead' : ''), style: `padding-left:${6 + (b.level - 1) * 14}px`, title: b.title, onclick: () => b.page != null && navGo(b.page) },
+        h('span', { class: 't' }, b.title || '(untitled)'), h('span', { class: 'p' }, pg(b.page)))));
+    }
+    if (!d.bookmarks.length && NAV.kind === 'all' && !s) items.append(h('div', { class: 'hint', style: 'margin:6px 0' }, 'This PDF has no bookmarks.'));
+    const ls = d.links.filter(l => (NAV.kind === 'all' || l.kind === NAV.kind) && hit(l.text + ' ' + (l.uri || '') + ' ' + (l.file || ''), l.src, l.page));
+    items.append(h('div', { class: 'navh' }, `LINKS ${ls.length}${ls.length > NAV.shown ? ` · showing ${NAV.shown}` : ''}`));
+    if (!ls.length) items.append(h('div', { class: 'hint', style: 'margin:6px 0' }, d.links.length ? 'No link matches.' : 'This PDF has no links.'));
+    let lastSrc = null;
+    for (const l of ls.slice(0, NAV.shown)) {
+      if (l.src !== lastSrc) { lastSrc = l.src; items.append(h('div', { class: 'navsrc', onclick: () => navGo(l.src) }, `on page ${l.src + 1}`)); }
+      const target = l.kind === 'page' ? '→ ' + pg(l.page) : l.kind === 'web' ? '↗ web' : '⧉ file';
+      items.append(h('div', { class: `navi ${l.kind}` + (l.kind === 'page' && l.page == null ? ' dead' : ''), title: l.uri || l.file || l.text, onclick: () => followLink(l) },
+        h('span', { class: 't' }, l.text || l.uri || l.file || '(no text under the link)'), h('span', { class: 'p' }, target)));
+    }
+    if (ls.length > NAV.shown) items.append(h('button', { class: 'btn sm', style: 'margin:8px 0', onclick: () => { NAV.shown += 500; fill(); } }, `show ${Math.min(500, ls.length - NAV.shown)} more`));
+  }
+  function show() {
+    const n = NAV.page, total = d.pages; view.innerHTML = '';
+    const inp = h('input', { type: 'number', min: 1, max: total, value: n + 1, onkeydown: e => { if (e.key === 'Enter') navGo(clamp(+inp.value - 1, 0, total - 1)); } });
+    const here = d.links.filter(l => l.src === n), back = [...new Set(d.links.filter(l => l.kind === 'page' && l.page === n).map(l => l.src))];
+    const box = h('div', { class: 'navpage' }, h('img', { src: `/api/files/${rec.id}/v/${v.n}/page/${n}.png?dpi=100`, alt: `page ${n + 1}` }),
+      ...here.map(l => h('a', { class: 'navlink ' + l.kind + (l.kind === 'page' && l.page == null ? ' dead' : ''), title: (l.kind === 'page' ? `go to ${pg(l.page)}` : l.uri || l.file) + (l.text ? ` · ${l.text}` : ''),
+        style: `left:${l.rect[0]}%;top:${l.rect[1]}%;width:${l.rect[2] - l.rect[0]}%;height:${l.rect[3] - l.rect[1]}%`, onclick: e => { e.preventDefault(); followLink(l); } })));
+    view.append(...[
+      h('div', { class: 'navbar' },
+        h('button', { class: 'btn sm', disabled: !NAV.back.length, title: 'Back to where the last link was clicked', onclick: () => { NAV.page = NAV.back.pop(); show(); } }, '◀ BACK'),
+        h('button', { class: 'btn sm', disabled: n <= 0, onclick: () => navGo(n - 1, false) }, '‹'), inp, h('span', {}, `/ ${total}`), h('button', { class: 'btn sm', disabled: n >= total - 1, onclick: () => navGo(n + 1, false) }, '›'),
+        h('button', { class: 'btn sm', title: 'Open this page in the workbench and select it', onclick: () => { showTab('work'); S.sel = new Set([n]); S.lastAnchor = n; syncSel(); gotoTile(n); } }, 'SHOW IN WORKBENCH'),
+        h('button', { class: 'btn sm', onclick: () => zoom(`/api/files/${rec.id}/v/${v.n}/page/${n}.png?dpi=150`) }, '⤢')),
+      h('div', { class: 'help' }, `${here.length} link(s) on this page, outlined in blue: click one to follow it.`),
+      back.length ? h('div', { class: 'navback' }, 'linked from:', ...back.slice(0, 12).map(s => h('button', { class: 'btn sm', onclick: () => navGo(s) }, 'p.' + (s + 1))), back.length > 12 ? ` +${back.length - 12} more` : '') : null,
+      box].filter(Boolean));
+  }
+  NAV.go = show; fill(); show();
+}
+function navGo(n, remember = true) { if (!NAV.data) return; if (remember && n !== NAV.page) NAV.back.push(NAV.page); NAV.page = clamp(n, 0, NAV.data.pages - 1); NAV.go && NAV.go(); }
+function followLink(l) {
+  if (l.kind === 'page') return l.page == null ? toast('this link pointed to a page that was removed', 'err') : navGo(l.page);
+  if (l.kind === 'web') return window.open(/^(https?:|mailto:)/i.test(l.uri) ? l.uri : 'https://' + l.uri, '_blank', 'noopener');
+  toast(`this link opens a file on the reader's computer: ${decodeURIComponent(l.file)}`);
+}
+document.addEventListener('keydown', e => {
+  if (S.tab !== 'nav' || !NAV.data || /INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName)) return;
+  if (e.key === 'ArrowRight' || e.key === 'PageDown') { e.preventDefault(); navGo(NAV.page + 1, false); }
+  if (e.key === 'ArrowLeft' || e.key === 'PageUp') { e.preventDefault(); navGo(NAV.page - 1, false); }
+});
+
+// ------------------------------------------------------------------ crop editor (zoomed, precise)
+// A big view of one page: corner + edge handles, drag inside to move, a magnifier while dragging,
+// arrow keys for 0.1% nudges, auto-detect of the content margins. It only fills the form; EXECUTE crops.
+async function openCropEditor() {
+  const rec = curRec(), v = verRec(); if (!rec || rec.kind !== 'pdf' || !v) return toast('select a PDF first', 'err');
+  const modal = $('#cropModal'), total = v.pages;
+  let page = S.sel.size ? Math.min(...S.sel) : 0, info = null, active = 'move', zoomK = 1;
+  const val = k => +($(`#opForm [data-p=${k}]`)?.value || 0), mmUnit = $('#opForm [data-p=unit]')?.dataset.val === 'mm';
+  const m = { t: val('top'), r: val('right'), b: val('bottom'), l: val('left') };
+  const MIN = 5, mm = pt => (pt * 25.4 / 72).toFixed(1);
+  const img = h('img', { draggable: 'false' }), loupe = h('div', { class: 'ce-loupe', hidden: true });
+  const frame = h('div', { class: 'ce-frame', 'data-h': 'move' }, ...['t', 'r', 'b', 'l', 'tl', 'tr', 'bl', 'br'].map(k => h('div', { class: 'ce-h ' + k, 'data-h': k })));
+  const wrap = h('div', { class: 'ce-wrap' }, img, frame), stage = h('div', { class: 'ce-stage' }, wrap, loupe);
+  const nums = {}, out = h('div', { class: 'ce-out' });
+  const side = h('div', { class: 'ce-side' },
+    h('div', { class: 'help' }, 'Drag the handles, or drag inside the frame to move it. Click a handle, then use the arrow keys: 0.1% per press, Shift = 1%.'),
+    ...[['t', 'top'], ['r', 'right'], ['b', 'bottom'], ['l', 'left']].map(([k, n]) => h('div', { class: 'field' }, h('label', {}, `trim ${n} %`),
+      nums[k] = h('input', { type: 'number', step: '0.1', min: 0, max: 95, oninput: e => { m[k] = clamp(+e.target.value || 0, 0, 100 - MIN - m[{ t: 'b', b: 't', l: 'r', r: 'l' }[k]]); draw(false); } }))),
+    out,
+    h('button', { class: 'btn', onclick: autoDetect, title: 'Find the box around everything printed on this page' }, '◎ AUTO-DETECT MARGINS'),
+    h('button', { class: 'btn', onclick: () => { Object.assign(m, { t: 0, r: 0, b: 0, l: 0 }); draw(); } }, '↺ RESET'),
+    h('div', { class: 'field' }, h('label', {}, 'APPLY THIS CROP TO'), h('div', { class: 'seg ce-to', 'data-val': S.sel.size ? 'selected' : 'all' },
+      ...['selected', 'this page', 'all', 'odd', 'even'].map(t => h('button', { type: 'button', class: t === (S.sel.size ? 'selected' : 'all') ? 'on' : '', disabled: t === 'selected' && !S.sel.size }, t)))),
+    h('button', { class: 'btn-go', onclick: () => apply(false) }, 'APPLY TO FORM'),
+    h('button', { class: 'btn', onclick: () => apply(true) }, 'APPLY & EXECUTE'));
+  const to = $('.ce-to', side); to.onclick = ev => { const b = ev.target.closest('button'); if (!b || b.disabled) return; $$('button', to).forEach(x => x.classList.toggle('on', x === b)); to.dataset.val = b.textContent; };
+  const pageInp = h('input', { type: 'number', min: 1, max: total, value: page + 1, onkeydown: e => { if (e.key === 'Enter') load(clamp(+pageInp.value - 1, 0, total - 1)); } });
+  const zseg = h('div', { class: 'seg' }, ...[['fit', 1], ['150%', 1.5], ['200%', 2], ['300%', 3]].map(([t, k]) => h('button', { type: 'button', class: k === 1 ? 'on' : '', onclick: e => { zoomK = k; $$('button', zseg).forEach(b => b.classList.toggle('on', b === e.target)); fit(); } }, t)));
+  modal.innerHTML = '';
+  modal.append(h('div', { class: 'ce' },
+    h('div', { class: 'ce-top' }, h('b', {}, 'CROP EDITOR'), h('span', {}, 'preview page'),
+      h('button', { class: 'btn sm', onclick: () => load(page - 1) }, '‹'), pageInp, h('span', {}, `/ ${total}`), h('button', { class: 'btn sm', onclick: () => load(page + 1) }, '›'),
+      h('span', { style: 'margin-left:12px' }, 'zoom'), zseg, h('button', { class: 'btn sm', style: 'margin-left:auto', onclick: close }, '✕ CLOSE')),
+    h('div', { class: 'ce-body' }, stage, side)));
+  modal.hidden = false;
+  if (mmUnit && (m.t || m.r || m.b || m.l)) toast('the form was in mm: values are now shown in % of the page');
+  function fit() { // the page fills the stage height at "fit"; zoom multiplies that and the stage scrolls
+    if (!info) return;
+    const H = stage.clientHeight - 24, W = stage.clientWidth - 24, ar = info.width / info.height;
+    const w = Math.min(W, H * ar) * zoomK; wrap.style.width = w + 'px'; wrap.style.height = w / ar + 'px';
+  }
+  async function load(n) {
+    page = clamp(n, 0, total - 1); pageInp.value = page + 1;
+    img.src = `/api/files/${rec.id}/v/${v.n}/page/${page}.png?dpi=150`;
+    loupe.style.backgroundImage = `url(/api/files/${rec.id}/v/${v.n}/page/${page}.png?dpi=220)`;
+    try { info = await api(`/api/files/${rec.id}/v/${v.n}/info/${page}`, { quiet: true }); } catch (e) { info = { width: 612, height: 792, content: null }; toast('could not read the page size; using Letter', 'err'); }
+    if (mmUnit && load.first !== false) { const W = info.width, H = info.height, p = x => x * 72 / 25.4; Object.assign(m, { t: p(m.t) / H * 100, b: p(m.b) / H * 100, l: p(m.l) / W * 100, r: p(m.r) / W * 100 }); }
+    load.first = false; fit(); draw(false);
+  }
+  function draw(syncInputs = true) {
+    frame.style.inset = `${m.t}% ${m.r}% ${m.b}% ${m.l}%`;
+    for (const k of 't r b l'.split(' ')) if (syncInputs || document.activeElement !== nums[k]) nums[k].value = m[k].toFixed(1);
+    $$('.ce-h', frame).forEach(x => x.classList.toggle('on', x.dataset.h === active));
+    if (info) out.textContent = `result: ${mm(info.width * (100 - m.l - m.r) / 100)} × ${mm(info.height * (100 - m.t - m.b) / 100)} mm  (page ${mm(info.width)} × ${mm(info.height)} mm)`;
+  }
+  async function autoDetect() {
+    let c = info && info.content;
+    if (!info) return;
+    if (!c) return toast('nothing printed on this page to detect', 'err');
+    const pad = .6; Object.assign(m, { t: Math.max(0, c[0] - pad), r: Math.max(0, c[1] - pad), b: Math.max(0, c[2] - pad), l: Math.max(0, c[3] - pad) }); active = 'move'; draw();
+    toast('frame set to the printed area + a small margin');
+  }
+  function edges(k, px, py) {
+    if (k.includes('t')) m.t = clamp(py, 0, 100 - m.b - MIN); if (k.includes('b')) m.b = clamp(100 - py, 0, 100 - m.t - MIN);
+    if (k.includes('l')) m.l = clamp(px, 0, 100 - m.r - MIN); if (k.includes('r')) m.r = clamp(100 - px, 0, 100 - m.l - MIN);
+  }
+  frame.addEventListener('pointerdown', ev => {
+    const k = ev.target.dataset.h; if (!k) return; ev.preventDefault(); active = k; frame.setPointerCapture(ev.pointerId);
+    const r0 = wrap.getBoundingClientRect(), sx = ev.clientX, sy = ev.clientY, s = { ...m };
+    const move = e => {
+      const r = wrap.getBoundingClientRect(), px = clamp((e.clientX - r.left) / r.width * 100, 0, 100), py = clamp((e.clientY - r.top) / r.height * 100, 0, 100);
+      if (k === 'move') {
+        const dx = clamp((e.clientX - sx) / r0.width * 100, -s.l, s.r), dy = clamp((e.clientY - sy) / r0.height * 100, -s.t, s.b);
+        Object.assign(m, { l: s.l + dx, r: s.r - dx, t: s.t + dy, b: s.b - dy });
+      } else edges(k, px, py);
+      draw(); magnify(k === 'move' ? null : [k.includes('l') ? m.l : k.includes('r') ? 100 - m.r : px, k.includes('t') ? m.t : k.includes('b') ? 100 - m.b : py], e);
+    };
+    const up = () => { frame.removeEventListener('pointermove', move); frame.removeEventListener('pointerup', up); frame.removeEventListener('pointercancel', up); loupe.hidden = true; };
+    frame.addEventListener('pointermove', move); frame.addEventListener('pointerup', up); frame.addEventListener('pointercancel', up); draw();
+  });
+  function magnify(pt, e) { // 3x view of the spot being dragged, so the edge can be placed on a hairline
+    if (!pt) { loupe.hidden = true; return; }
+    const r = wrap.getBoundingClientRect(), sr = stage.getBoundingClientRect(), K = 3, L = 170;
+    loupe.hidden = false; loupe.style.backgroundSize = `${r.width * K}px ${r.height * K}px`;
+    loupe.style.backgroundPosition = `${-(pt[0] / 100 * r.width * K - L / 2)}px ${-(pt[1] / 100 * r.height * K - L / 2)}px`;
+    const x = e.clientX - sr.left, y = e.clientY - sr.top;
+    loupe.style.left = clamp(x + 30, 0, sr.width - L) + stage.scrollLeft + 'px'; loupe.style.top = clamp(y - L - 30 < 0 ? y + 30 : y - L - 30, 0, sr.height - L) + stage.scrollTop + 'px';
+  }
+  function key(e) {
+    if (modal.hidden) return;
+    if (e.key === 'Escape') return close();
+    const d = { ArrowUp: [0, -1], ArrowDown: [0, 1], ArrowLeft: [-1, 0], ArrowRight: [1, 0] }[e.key]; if (!d || /INPUT/.test(document.activeElement.tagName)) return;
+    e.preventDefault(); const st = e.shiftKey ? 1 : .1, [dx, dy] = [d[0] * st, d[1] * st];
+    if (active === 'move') { const ddx = clamp(dx, -m.l, m.r), ddy = clamp(dy, -m.t, m.b); m.l += ddx; m.r -= ddx; m.t += ddy; m.b -= ddy; }
+    else edges(active, (active.includes('l') ? m.l : 100 - m.r) + dx, (active.includes('t') ? m.t : 100 - m.b) + dy);
+    draw();
+  }
+  function apply(run) {
+    const set = (n, x) => { const el = $(`#opForm [data-p=${n}]`); if (el) el.value = (+x.toFixed(2)).toString(); };
+    const unit = $('#opForm [data-p=unit]'); if (unit) { unit.dataset.val = 'percent'; $$('button', unit).forEach(b => b.classList.toggle('on', b.textContent === 'percent')); }
+    set('top', m.t); set('right', m.r); set('bottom', m.b); set('left', m.l);
+    const target = to.dataset.val, pf = $('#opForm [data-p=pages]');
+    if (pf) { pf.value = target === 'selected' ? compressPages(S.sel) : target === 'this page' ? String(page + 1) : target; pf.dispatchEvent(new Event('input')); }
+    cropSync(); close(); toast('crop values copied into the form'); if (run) runOp();
+  }
+  function close() { modal.hidden = true; modal.innerHTML = ''; document.removeEventListener('keydown', key); window.removeEventListener('resize', fit); }
+  document.addEventListener('keydown', key); window.addEventListener('resize', fit);
+  draw(); load(page);
+}
 
 // ------------------------------------------------------------------ compare
 function pdfVersions() { const out = []; for (const f of S.files) if (f.kind === 'pdf') for (const v of f.versions) out.push({ key: `${f.id}:${v.n}`, fid: f.id, v: v.n, label: `${f.name} · v${v.n} ${v.op} (${v.pages}p, ${fmtBytes(v.size)})` }); return out; }

@@ -1,4 +1,4 @@
-"""'1,3,5-8,last' -> [0,2,4,5,6,7,n-1]. Errors say which token was wrong and why."""
+"""'1,3,5-8,last' -> [0,2,4,5,6,7,n-1]; 'odd' / 'even' are the odd / even page numbers. Errors say which token was wrong and why."""
 import re
 
 from .errors import AppError
@@ -16,11 +16,14 @@ def parse_pages(spec, n, *, dedupe=True, required=False, sort=False):
     for tok in re.split(r"[,\s;]+", spec):
         if not tok:
             continue
+        if tok in ("odd", "even"):
+            out.extend(range(0 if tok == "odd" else 1, n, 2))
+            continue
         m = re.fullmatch(r"(\d+|last)?(-)?(\d+|last)?", tok)
         if not m or not (m.group(1) or m.group(3)):
             raise AppError("E_PAGE_SPEC", f"Cannot read page token '{tok}'",
                            f"'{tok}' is not a number, a range like 3-7, or the word 'last'. Full input was: '{spec}'.",
-                           "Use comma-separated numbers and ranges, e.g. 1,3,5-8,last")
+                           "Use comma-separated numbers and ranges, e.g. 1,3,5-8,last (or odd / even)")
         def val(x):
             return n if x == "last" else int(x)
         a, dash, b = m.group(1), m.group(2), m.group(3)

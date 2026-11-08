@@ -22,6 +22,11 @@ button:hover,a.btn:hover{border-color:var(--phos);color:var(--phos)}
 button:disabled{opacity:.4;cursor:default;border-color:var(--line);color:var(--text)}
 button.danger:hover{border-color:var(--red);color:var(--red)}
 #msg{min-height:20px;margin-top:10px;color:var(--amber);font-size:13px}
+.err{display:none;margin-top:12px;border:1px solid var(--red);padding:10px}
+.err.show{display:block}
+.err b{color:var(--red);letter-spacing:.08em}
+.err p{margin:6px 0 10px;font-size:13px}
+.err small{color:var(--dim);display:block;margin-top:8px}
 pre{background:#030706;border:1px solid var(--line);padding:10px;max-height:240px;overflow:auto;font-size:12px;color:var(--dim);white-space:pre-wrap;margin:12px 0 0}
 </style>
 </head>
@@ -37,11 +42,42 @@ pre{background:#030706;border:1px solid var(--line);padding:10px;max-height:240p
     <button id="quitBtn" class="danger">Quit launcher</button>
   </div>
   <div id="msg"></div>
+  <div class="err" id="err">
+    <b id="errCode">ERROR</b>
+    <p id="errMsg"></p>
+    <button id="copyBtn">Copy error report</button>
+    <small>Paste the report (Ctrl+V) into a message to the person who gave you PDF//SCOPE.
+      It is also saved in the <code>logs\last-error.txt</code> file.</small>
+  </div>
   <pre id="log">(no log yet)</pre>
 </main>
 <script>
 const $ = id => document.getElementById(id);
 let busy = false;
+let report = '';
+
+function showError(code, message, text) {
+  report = text || `PDF//SCOPE error ${code}
+${message}
+
+Time: ${new Date().toString()}
+Browser: ${navigator.userAgent}`;
+  $('errCode').textContent = 'ERROR ' + code;
+  $('errMsg').textContent = message;
+  $('copyBtn').textContent = 'Copy error report';
+  $('err').className = 'err show';
+}
+
+function hideError() { $('err').className = 'err'; }
+
+async function copyReport() {
+  try { await navigator.clipboard.writeText(report); }
+  catch (e) {  // older browsers: copy through a hidden text box
+    const t = document.createElement('textarea'); t.value = report; document.body.append(t);
+    t.select(); document.execCommand('copy'); t.remove();
+  }
+  $('copyBtn').textContent = 'Copied! Now paste it in a message';
+}
 
 function render(s) {
   const led = $('led'), txt = $('stateTxt');
@@ -59,8 +95,12 @@ function render(s) {
 async function refresh() {
   try {
     render(await (await fetch('/api/status', { cache: 'no-store' })).json());
+    if ($('errCode').textContent === 'ERROR PS-205') hideError();
   } catch (e) {
+    if (!$('err')) return;  // the launcher was closed on purpose (Quit)
     $('stateTxt').textContent = 'Launcher unreachable';
+    $('led').className = 'led off';
+    showError('PS-205', 'This page cannot reach the PDF//SCOPE launcher. It may have been closed or blocked. Double-click "Start PDF Scope" again.', null);
   }
 }
 
@@ -70,7 +110,8 @@ async function act(path, label) {
   ['startBtn', 'stopBtn', 'quitBtn'].forEach(id => $(id).disabled = true);
   try {
     const r = await (await fetch(path, { method: 'POST' })).json();
-    $('msg').textContent = r.message;
+    $('msg').textContent = r.ok ? r.message : '';
+    if (r.ok) hideError(); else showError(r.code || 'PS-299', r.message, r.report);
   } catch (e) {
     $('msg').textContent = 'Request failed: ' + e;
   } finally {
@@ -80,6 +121,7 @@ async function act(path, label) {
   }
 }
 
+$('copyBtn').onclick = copyReport;
 $('startBtn').onclick = () => act('/api/start', 'Starting');
 $('stopBtn').onclick = () => act('/api/stop', 'Stopping');
 $('quitBtn').onclick = async () => {

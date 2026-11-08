@@ -6,14 +6,16 @@ the PDF server (run.py) as a child process. Nothing starts at boot or login.
 """
 import json
 import logging
+import platform
 import subprocess
+import sys
 import threading
 import time
+import traceback
 import urllib.request
+from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-
-import psutil
 
 ROOT = Path(__file__).resolve().parent.parent
 LAUNCHER_DIR = ROOT / "launcher"
@@ -39,6 +41,50 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(message)s",
 )
 log = logging.getLogger("pdfscope.control")
+LAST_ERROR = LOG_DIR / "last-error.txt"
+
+# Error codes shown to the user. The README lists each one with what to do.
+#   PS-203  the control helper itself crashed (Python error)
+#   PS-301  the PDF server exited while starting
+#   PS-302  the Python environment (venv) is missing
+#   PS-303  port 8000 is already used by another program
+#   PS-401  Windows Smart App Control blocked a file the app needs
+SAC_MARKERS = ("application control policy has blocked", "smart app control", "winerror 4551")
+
+
+def smart_app_control_blocked(text: str) -> bool:
+    low = text.lower()
+    return any(m in low for m in SAC_MARKERS)
+
+
+def error_report(code: str, message: str, log_lines=None) -> str:
+    """Plain-text report the user can paste to whoever supports them. Also saved to logs/last-error.txt."""
+    lines = [
+        f"PDF//SCOPE error {code}",
+        message,
+        "",
+        f"Time:    {datetime.now():%Y-%m-%d %H:%M:%S}",
+        f"Windows: {platform.platform()}",
+        f"Python:  {sys.version.split()[0]} ({sys.executable})",
+        f"Folder:  {ROOT}",
+    ]
+    if log_lines:
+        lines += ["", "--- last log lines ---", *log_lines]
+    text = "\n".join(lines)
+    try:
+        LAST_ERROR.write_text(text, encoding="utf-8")
+    except OSError:
+        pass
+    return text
+
+
+try:
+    import psutil
+except Exception as exc:  # a broken venv, or Smart App Control blocking psutil's DLL
+    code = "PS-401" if smart_app_control_blocked(str(exc)) else "PS-203"
+    log.error("%s control helper could not start:\n%s", code, traceback.format_exc())
+    error_report(code, f"The control helper could not start: {exc}", traceback.format_exc().splitlines())
+    raise
 
 _lock = threading.Lock()
 _httpd = None
@@ -110,7 +156,7 @@ def start() -> dict:
         if _server_pid() is not None:
             return {"ok": True, "message": "Already running"}
         if not PYTHONW.exists():
-            return {"ok": False, "message": f"Python environment not found: {PYTHONW}. Create the venv and install requirements.txt."}
+            return _fail("PS-302", f"Python environment not found: {PYTHONW}. Double-click 'Start PDF Scope' again to rebuild it.")
         # 'wb' keeps only this run's output, so the log cannot grow without limit.
         with open(SERVER_LOG, "wb") as out:
             proc = subprocess.Popen(
@@ -130,8 +176,19 @@ def start() -> dict:
         if proc.poll() is not None:
             _clear_pid()
             log.error("PDF server exited during startup, code=%s", proc.returncode)
-            return {"ok": False, "message": f"Server exited during startup (code {proc.returncode}). See the log below."}
+            tail = "\n".join(_log_tail(60)).lower()
+            if smart_app_control_blocked(tail):
+                return _fail("PS-401", "Windows Smart App Control blocked a file the PDF server needs. See 'Smart App Control' in the README.")
+            if "10048" in tail or "address already in use" in tail or "only one usage of each socket" in tail:
+                return _fail("PS-303", "Port 8000 is already used by another program. Close that program (or restart the computer) and press Start again.")
+            return _fail("PS-301", f"The PDF server stopped while starting (exit code {proc.returncode}).")
         return {"ok": True, "message": "Started, still loading"}
+
+
+def _fail(code: str, message: str) -> dict:
+    log.error("%s %s", code, message)
+    return {"ok": False, "code": code, "message": f"[{code}] {message}",
+            "report": error_report(code, message, _log_tail(60))}
 
 
 def stop() -> dict:
@@ -170,6 +227,8 @@ class Handler(BaseHTTPRequestHandler):
     server_version = "PDFScopeControl/1.0"
 
     def log_message(self, format, *args):  # route access logs to launcher.log
+        if "/api/status" in self.path:  # polled every 2 s by the page; would bury the useful lines
+            return
         log.info("%s %s", self.address_string(), format % args)
 
     def _host_ok(self) -> bool:
@@ -214,7 +273,13 @@ class Handler(BaseHTTPRequestHandler):
         action = routes.get(self.path)
         if action is None:
             return self._send(404, b"Not found", "text/plain")
-        self._json(action())
+        try:
+            result = action()
+        except Exception as exc:
+            log.exception("PS-203 %s failed", self.path)
+            result = {"ok": False, "code": "PS-203", "message": f"[PS-203] The launcher hit an error: {exc}",
+                      "report": error_report("PS-203", f"{self.path} failed: {exc}", traceback.format_exc().splitlines())}
+        self._json(result)
 
 
 def main():
@@ -234,4 +299,9 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as exc:
+        log.exception("PS-203 control helper crashed")
+        error_report("PS-203", f"The control helper crashed: {exc}", traceback.format_exc().splitlines())
+        raise

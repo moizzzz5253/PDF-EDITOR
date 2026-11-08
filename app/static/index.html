@@ -57,6 +57,7 @@
     </section>
     <nav id="tabs">
       <button data-tab="work" class="on">WORKBENCH</button>
+      <button data-tab="nav">NAVIGATE</button>
       <button data-tab="compare">COMPARE</button>
       <button data-tab="share">RENAME &amp; SHARE</button>
     </nav>
@@ -68,8 +69,10 @@
       </div>
       <div class="panel" id="opForm"></div>
     </section>
+    <section id="tab-nav" class="tab"></section>
     <section id="tab-compare" class="tab"></section>
     <section id="tab-share" class="tab"></section>
+    <div id="dock" hidden></div>
   </section>
 
   <aside id="right">
@@ -93,6 +96,7 @@
 </main>
 <div id="toast"></div>
 <div id="lightbox" hidden></div>
+<div id="cropModal" hidden></div>
 <script src="/app.js"></script>
 <script src="/server.js"></script>
 </body>

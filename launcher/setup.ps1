@@ -34,10 +34,44 @@ function Say($text) {
 # Yes/No dialog. Returns $true for Yes.
 function Ask($text) { return $Shell.Popup($text, 0, $Title, 4 + 32) -eq 6 }
 
-function Fail($text) {
-    Say "FAILED: $text"
-    [void]$Shell.Popup("$text`n`nDetails: $Log", 0, $Title, 16)
+# Error codes (the README lists each one with what to do):
+#   PS-101 Python missing / could not be installed   PS-102 venv could not be created
+#   PS-103 packages could not be installed           PS-104 unexpected setup error
+#   PS-401 Windows Smart App Control blocked a file
+$LastError = Join-Path $LogDir 'last-error.txt'
+
+function Test-SmartAppControl([string]$text) {
+    return $text -match 'Application Control policy has blocked|Smart App Control|WinError 4551'
+}
+
+# Shows the error, saves a full report to logs\last-error.txt and copies it to the clipboard,
+# so the user can paste it straight into a message.
+function Fail($code, $text) {
+    $tail = @()
+    if (Test-Path $Log) { $tail = @(Get-Content $Log -Tail 40 -ErrorAction SilentlyContinue) }
+    if ($code -ne 'PS-401' -and (Test-SmartAppControl ($tail -join "`n"))) {
+        $code = 'PS-401'
+        $text = "Windows Smart App Control blocked a file PDF//SCOPE needs.`n`nSee 'Smart App Control' in the README for how to fix it."
+    }
+    Say "FAILED $code`: $text"
+    $os = (Get-CimInstance Win32_OperatingSystem -ErrorAction SilentlyContinue)
+    $report = @(
+        "PDF//SCOPE error $code", $text, '',
+        "Time:    $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')",
+        "Windows: $($os.Caption) $($os.Version)",
+        "Folder:  $Root", '', '--- last log lines ---') + $tail
+    $report = $report -join "`r`n"
+    try { Set-Content -Path $LastError -Value $report -Encoding UTF8 } catch {}
+    $copied = $true
+    try { Set-Clipboard -Value $report } catch { $copied = $false }
+    $how = if ($copied) { "The full error report has been COPIED. Paste it (Ctrl+V) into a message to the person who gave you PDF//SCOPE." }
+           else { "Send the file $LastError to the person who gave you PDF//SCOPE." }
+    [void]$Shell.Popup("Error $code`n`n$text`n`n$how", 0, "$Title - error $code", 16)
     exit 1
+}
+
+trap {
+    Fail 'PS-104' "Setup stopped unexpectedly: $($_.Exception.Message)"
 }
 
 # Runs a program and copies its output to the console and the log. Returns the exit code.
@@ -118,7 +152,7 @@ if ((Test-Path $VenvPy) -and (Test-Python $VenvPy @())) {
                                     '--accept-package-agreements', '--accept-source-agreements')
             Update-Path
             $Python = Find-Python
-            if (-not $Python) { Fail "Python could not be installed automatically (winget exit code $rc).`n`nInstall it from $PythonPage, then double-click Start PDF Scope again." }
+            if (-not $Python) { Fail 'PS-101' "Python could not be installed automatically (winget exit code $rc).`n`nInstall it from $PythonPage, then double-click Start PDF Scope again." }
         } else {
             Start-Process $PythonPage
             [void]$Shell.Popup("Install Python from the page that just opened (the big 'Download Python' button).`n`nIn the installer, tick 'Add python.exe to PATH' at the bottom of the first screen, then click Install Now.`n`nWhen it finishes, double-click Start PDF Scope again.", 0, $Title, 64)
@@ -129,14 +163,14 @@ if ((Test-Path $VenvPy) -and (Test-Python $VenvPy @())) {
     Say "Found Python: $Python"
 
     Say "Creating venv\ ..."
-    if ((Run $Python @('-m', 'venv', $Venv)) -ne 0 -or -not (Test-Path $VenvPy)) { Fail "Could not create the Python environment in $Venv." }
+    if ((Run $Python @('-m', 'venv', $Venv)) -ne 0 -or -not (Test-Path $VenvPy)) { Fail 'PS-102' "Could not create the Python environment in $Venv." }
 }
 
 # ---------------------------------------------------------------- 2. Packages
 Say "Installing packages (the first time downloads about 100 MB)..."
 [void](Run $VenvPy @('-m', 'pip', 'install', '--upgrade', '--disable-pip-version-check', 'pip'))
 if ((Run $VenvPy @('-m', 'pip', 'install', '--disable-pip-version-check', '-r', $Req)) -ne 0) {
-    Fail "Installing the packages failed. Check your internet connection, then double-click Start PDF Scope again."
+    Fail 'PS-103' "Installing the packages failed. Check your internet connection, then double-click Start PDF Scope again."
 }
 Copy-Item -Force $Req $Marker
 Say "Packages installed."
