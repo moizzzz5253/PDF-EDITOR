@@ -85,7 +85,7 @@ Sub Fail(code, message, logName)
   sh.Run "cmd.exe /c clip < """ & path & """", 0, True
   On Error GoTo 0
   MsgBox "Error " & code & vbCrLf & vbCrLf & message & vbCrLf & vbCrLf & _
-    "The full error report has been COPIED. Paste it (Ctrl+V) into a message to the person who gave you PDF//SCOPE." & vbCrLf & _
+    "The full error report has been COPIED. Paste it (Ctrl+V) into an email to moizshabbar30@gmail.com." & vbCrLf & _
     "(It is also saved in logs\last-error.txt.)", vbCritical, "PDF//SCOPE - error " & code
   WScript.Quit 1
 End Sub

@@ -69,7 +69,7 @@ Every error, at every stage, has a **code** (like `PS-103` or `E_PDF_CORRUPT`) a
 | The dashboard (red fault card) | Click **COPY DIAGNOSTIC**. |
 | Nothing opens at all | Open the app folder → `logs` → send the file `last-error.txt` (and `setup.log` if there is one). |
 
-Paste the report into WhatsApp or email and send it to the person who gave you PDF//SCOPE.
+Paste the report into an email and send it to **moizshabbar30@gmail.com**.
 The report contains the error code, your Windows version, the time and the last log lines. It contains no file contents.
 
 ### Error codes

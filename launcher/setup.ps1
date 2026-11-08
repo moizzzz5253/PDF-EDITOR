@@ -64,8 +64,8 @@ function Fail($code, $text) {
     try { Set-Content -Path $LastError -Value $report -Encoding UTF8 } catch {}
     $copied = $true
     try { Set-Clipboard -Value $report } catch { $copied = $false }
-    $how = if ($copied) { "The full error report has been COPIED. Paste it (Ctrl+V) into a message to the person who gave you PDF//SCOPE." }
-           else { "Send the file $LastError to the person who gave you PDF//SCOPE." }
+    $how = if ($copied) { "The full error report has been COPIED. Paste it (Ctrl+V) into an email to moizshabbar30@gmail.com." }
+           else { "Send the file $LastError to moizshabbar30@gmail.com." }
     [void]$Shell.Popup("Error $code`n`n$text`n`n$how", 0, "$Title - error $code", 16)
     exit 1
 }
